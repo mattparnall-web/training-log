@@ -63,23 +63,23 @@ async function cloudDelete(id) {
 
 // --- DATA CONSTANTS ---
 const DAYS = [
-  { id: "monday", label: "MON", name: "Active Recovery", type: "recovery", color: "#16a34a" },
+  { id: "monday", label: "MON", name: "Upper Push", type: "upper_push", color: "#7c3aed" },
   { id: "tuesday", label: "TUE", name: "Lower — Squat", type: "lower_squat", color: "#2563eb" },
-  { id: "wednesday", label: "WED", name: "Upper Body", type: "upper", color: "#7c3aed" },
-  { id: "thursday", label: "THU", name: "Lower — Hinge", type: "lower_hinge", color: "#2563eb" },
-  { id: "friday", label: "FRI", name: "Full Body Power", type: "power", color: "#ea580c" },
-  { id: "saturday", label: "SAT", name: "CrossFit Conditioning", type: "crossfit", color: "#dc2626" },
+  { id: "wednesday", label: "WED", name: "Active Recovery", type: "recovery", color: "#16a34a" },
+  { id: "thursday", label: "THU", name: "Upper Pull + Deadlifts", type: "upper_pull", color: "#0891b2" },
+  { id: "friday", label: "FRI", name: "Flexible", type: "flexible", color: "#94a3b8" },
+  { id: "saturday", label: "SAT", name: "Olympic Lifts + MetCon", type: "olympic", color: "#dc2626" },
   { id: "sunday", label: "SUN", name: "Zone 2 Cardio", type: "cardio", color: "#16a34a" },
 ];
 
 const EXERCISE_TEMPLATES = {
-  lower_squat: ["Goblet Squat", "Back Squat", "Front Squat", "Bulgarian Split Squat", "Dumbbell Squat", "Step-ups", "Lunges", "Calf Raise"],
-  lower_hinge: ["Dumbbell Deadlift", "Romanian Deadlift", "Single-Leg RDL", "Sumo Deadlift", "Hip Thrust", "Good Morning", "Glute Bridge", "Kettlebell Swing"],
-  upper: ["Pull-ups", "Dumbbell Bench Press", "Dumbbell Row", "Overhead Press", "Incline Press", "Face Pull", "Bicep Curl", "Tricep Extension", "Lat Pulldown", "Push-ups"],
-  power: ["Dumbbell Clean", "Push Press", "Box Jump", "Dumbbell Snatch", "Thrusters", "Renegade Row", "Power Clean", "Jump Squat"],
-  crossfit: ["Rowing (metres)", "Cycling (mins)", "Burpees", "Box Jumps", "Wall Balls", "Double Unders", "Kettlebell Swings", "Pull-ups", "Push-ups", "Thrusters"],
+  upper_push: ["Dumbbell Bench Press", "Overhead Press", "Incline Press", "Push-ups", "Dumbbell Shoulder Press", "Tricep Extension", "Chest Fly", "Arnold Press", "Close-grip Press", "Lateral Raise"],
+  lower_squat: ["Back Squat", "Front Squat", "Goblet Squat", "Bulgarian Split Squat", "Dumbbell Squat", "Step-ups", "Lunges", "Calf Raise", "Leg Press (DB)", "Box Squat"],
+  recovery: ["Mobility Work", "Foam Rolling", "Stretching", "Ice Bath", "Light Cycling", "Yoga Flow", "Breathwork"],
+  upper_pull: ["Pull-ups", "Dumbbell Row", "Barbell Deadlift", "Romanian Deadlift", "Face Pull", "Bicep Curl", "Lat Pulldown", "Single-Arm Row", "Shrug", "Hammer Curl"],
+  flexible: ["Pull-ups", "Dumbbell Bench Press", "Overhead Press", "Dumbbell Row", "Mobility Work", "Foam Rolling", "Ice Bath", "Light Cycling"],
+  olympic: ["Barbell Clean", "Power Clean", "Barbell Snatch", "Push Press", "Clean & Jerk", "Hang Clean", "Muscle Snatch", "Rowing (metres)", "Cycling (mins)", "Burpees", "Box Jumps", "Wall Balls", "Thrusters", "Double Unders"],
   cardio: ["Cycling (mins)", "Rowing (mins)", "Walk/Jog", "Zone 2 Cycling"],
-  recovery: ["Mobility Work", "Foam Rolling", "Stretching", "Ice Bath", "Light Cycling", "Yoga Flow"],
 };
 
 const T = {
