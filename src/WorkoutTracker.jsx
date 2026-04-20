@@ -132,7 +132,7 @@ function AnalyseButton({ sessions, onResult }) {
       const resp = await fetch("/api/proxy", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514", max_tokens: 1000,
+          model: "claude-3-5-sonnet-20241022", max_tokens: 1000,
           system: "You are an expert strength and conditioning coach specialising in body recomposition and hypertrophy. The user is a 39-year-old male training for body recomposition — reducing fat while building significant lower body muscle mass. He trains from a home gym with dumbbells, pull-up bar, rowing machine, cycling machine. Weekly: Mon recovery, Tue lower squat, Wed upper, Thu lower hinge, Fri power, Sat CrossFit, Sun Zone 2. Intermediate/advanced understanding — be mechanistic, specific, practical. No generic advice.",
           messages: [{ role: "user", content: `Recent sessions:\n\n${summary}\n\nAnalyse: 1) Progressive overload trends, 2) Weaknesses/imbalances, 3) Programme tweaks, 4) Priorities. Concise bullets.` }]
         })
@@ -180,7 +180,7 @@ function WhiteboardImporter({ day, onImported, onCancel }) {
       const resp = await fetch("/api/proxy", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514", max_tokens: 2000,
+          model: "claude-3-5-sonnet-20241022", max_tokens: 2000,
           messages: [{
             role: "user",
             content: [
