@@ -106,6 +106,8 @@ const CameraIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="n
 const CheckIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>;
 const CloudIcon = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>;
 const DuplicateIcon = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>;
+const TimerIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+const ZapIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
 
 // --- Sparkline ---
 function MiniSparkline({ data, color }) {
@@ -127,7 +129,7 @@ function AnalyseButton({ sessions, onResult }) {
       const summary = sessions.slice(-20).map(s =>
         `${s.date} (${s.dayName}): ${s.exercises.map(e => `${e.name} - ${e.sets.map(st => `${st.reps}r@${st.weight}kg`).join(", ")}`).join("; ")}${s.notes ? ` | Notes: ${s.notes}` : ""}`
       ).join("\n");
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      const resp = await fetch("/api/proxy", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514", max_tokens: 1000,
@@ -175,7 +177,7 @@ function WhiteboardImporter({ day, onImported, onCancel }) {
     setStep("scanning");
     setErrorMsg("");
     try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      const resp = await fetch("/api/proxy", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514", max_tokens: 2000,
@@ -392,6 +394,175 @@ function ExerciseCard({ exercise, onChange, onRemove, type, allHistory }) {
   );
 }
 
+
+// --- AMRAP Logger ---
+function AmrapLogger({ onSave, onCancel }) {
+  const [name, setName] = useState("");
+  const [timeCap, setTimeCap] = useState("");
+  const [exercises, setExercises] = useState([{ name: "", reps: "" }]);
+  const [rounds, setRounds] = useState("");
+  const [extraReps, setExtraReps] = useState("");
+  const [notes, setNotes] = useState("");
+
+  function addExercise() { setExercises(e => [...e, { name: "", reps: "" }]); }
+  function updateEx(i, field, val) { setExercises(e => e.map((ex, idx) => idx === i ? { ...ex, [field]: val } : ex)); }
+  function removeEx(i) { setExercises(e => e.filter((_, idx) => idx !== i)); }
+
+  function save() {
+    const result = {
+      name: name || "AMRAP",
+      type: "amrap",
+      timeCap: timeCap ? parseInt(timeCap) : null,
+      exercises: exercises.filter(e => e.name),
+      result: { rounds: rounds ? parseInt(rounds) : null, extraReps: extraReps ? parseInt(extraReps) : null },
+      notes
+    };
+    onSave(result);
+  }
+
+  const valid = exercises.some(e => e.name) && (rounds || extraReps);
+
+  return (
+    <div style={{ background: "#fef3c7", border: "1px solid #f59e0b44", borderRadius: "14px", padding: "16px", marginBottom: "16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+        <ZapIcon /><span style={{ fontSize: "12px", fontWeight: "800", color: "#92400e", letterSpacing: "0.08em" }}>AMRAP</span>
+      </div>
+      <input placeholder="Name (e.g. The Chief)" value={name} onChange={e => setName(e.target.value)}
+        style={{ ...inputStyle, width: "100%", marginBottom: "10px" }} />
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px" }}>
+        <TimerIcon />
+        <input type="number" placeholder="Time cap (mins)" value={timeCap} onChange={e => setTimeCap(e.target.value)}
+          style={{ ...inputStyle, width: "140px" }} />
+      </div>
+      <div style={{ fontSize: "11px", color: "#92400e", fontWeight: "700", marginBottom: "6px", letterSpacing: "0.08em" }}>MOVEMENTS</div>
+      {exercises.map((ex, i) => (
+        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+          <input placeholder="Exercise" value={ex.name} onChange={e => updateEx(i, "name", e.target.value)}
+            style={{ ...inputStyle, flex: 2, width: "auto" }} />
+          <input type="number" placeholder="reps" value={ex.reps} onChange={e => updateEx(i, "reps", e.target.value)}
+            style={{ ...inputStyle, width: "60px" }} />
+          <button onClick={() => removeEx(i)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer" }}><TrashIcon /></button>
+        </div>
+      ))}
+      <button onClick={addExercise} style={{ background: "none", border: "none", color: "#92400e", fontSize: "12px", cursor: "pointer", fontFamily: "inherit", marginBottom: "12px" }}>+ movement</button>
+      <div style={{ fontSize: "11px", color: "#92400e", fontWeight: "700", marginBottom: "6px", letterSpacing: "0.08em" }}>RESULT</div>
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "10px" }}>
+        <input type="number" placeholder="Rounds" value={rounds} onChange={e => setRounds(e.target.value)} style={{ ...inputStyle, width: "90px" }} />
+        <span style={{ color: T.textMuted, fontSize: "12px" }}>rounds +</span>
+        <input type="number" placeholder="reps" value={extraReps} onChange={e => setExtraReps(e.target.value)} style={{ ...inputStyle, width: "70px" }} />
+        <span style={{ color: T.textMuted, fontSize: "12px" }}>reps</span>
+      </div>
+      <input placeholder="Notes…" value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: "10px" }} />
+      <div style={{ display: "flex", gap: "8px" }}>
+        <button onClick={onCancel} style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, color: T.textSub, borderRadius: "8px", padding: "8px", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+        <button onClick={save} disabled={!valid} style={{ flex: 2, background: valid ? "#f59e0b" : T.surface2, border: "none", color: valid ? "#fff" : T.textMuted, borderRadius: "8px", padding: "8px", fontSize: "12px", fontWeight: "700", cursor: valid ? "pointer" : "not-allowed", fontFamily: "inherit" }}>Add AMRAP</button>
+      </div>
+    </div>
+  );
+}
+
+// --- EMOM Logger ---
+function EmomLogger({ onSave, onCancel }) {
+  const [name, setName] = useState("");
+  const [duration, setDuration] = useState("");
+  const [interval, setInterval] = useState("1");
+  const [exercises, setExercises] = useState([{ name: "", reps: "" }]);
+  const [completed, setCompleted] = useState("");
+  const [notes, setNotes] = useState("");
+
+  function addExercise() { setExercises(e => [...e, { name: "", reps: "" }]); }
+  function updateEx(i, field, val) { setExercises(e => e.map((ex, idx) => idx === i ? { ...ex, [field]: val } : ex)); }
+  function removeEx(i) { setExercises(e => e.filter((_, idx) => idx !== i)); }
+
+  function save() {
+    const result = {
+      name: name || "EMOM",
+      type: "emom",
+      duration: duration ? parseInt(duration) : null,
+      interval: interval ? parseInt(interval) : 1,
+      exercises: exercises.filter(e => e.name),
+      result: { completed: completed ? parseInt(completed) : null },
+      notes
+    };
+    onSave(result);
+  }
+
+  const valid = exercises.some(e => e.name) && duration;
+
+  return (
+    <div style={{ background: "#ede9fe", border: "1px solid #7c3aed44", borderRadius: "14px", padding: "16px", marginBottom: "16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+        <TimerIcon /><span style={{ fontSize: "12px", fontWeight: "800", color: "#4c1d95", letterSpacing: "0.08em" }}>EMOM</span>
+      </div>
+      <input placeholder="Name (e.g. Squat EMOM)" value={name} onChange={e => setName(e.target.value)}
+        style={{ ...inputStyle, width: "100%", marginBottom: "10px" }} />
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px" }}>
+        <TimerIcon />
+        <input type="number" placeholder="Total mins" value={duration} onChange={e => setDuration(e.target.value)} style={{ ...inputStyle, width: "100px" }} />
+        <span style={{ color: T.textMuted, fontSize: "12px" }}>mins, every</span>
+        <input type="number" placeholder="1" value={interval} onChange={e => setInterval(e.target.value)} style={{ ...inputStyle, width: "50px" }} />
+        <span style={{ color: T.textMuted, fontSize: "12px" }}>min</span>
+      </div>
+      <div style={{ fontSize: "11px", color: "#4c1d95", fontWeight: "700", marginBottom: "6px", letterSpacing: "0.08em" }}>MOVEMENTS PER INTERVAL</div>
+      {exercises.map((ex, i) => (
+        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+          <input placeholder="Exercise" value={ex.name} onChange={e => updateEx(i, "name", e.target.value)}
+            style={{ ...inputStyle, flex: 2, width: "auto" }} />
+          <input type="number" placeholder="reps" value={ex.reps} onChange={e => updateEx(i, "reps", e.target.value)}
+            style={{ ...inputStyle, width: "60px" }} />
+          <button onClick={() => removeEx(i)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer" }}><TrashIcon /></button>
+        </div>
+      ))}
+      <button onClick={addExercise} style={{ background: "none", border: "none", color: "#4c1d95", fontSize: "12px", cursor: "pointer", fontFamily: "inherit", marginBottom: "12px" }}>+ movement</button>
+      <div style={{ fontSize: "11px", color: "#4c1d95", fontWeight: "700", marginBottom: "6px", letterSpacing: "0.08em" }}>RESULT</div>
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "10px" }}>
+        <input type="number" placeholder="Rounds completed" value={completed} onChange={e => setCompleted(e.target.value)} style={{ ...inputStyle, width: "140px" }} />
+        <span style={{ color: T.textMuted, fontSize: "12px" }}>/ {duration && interval ? Math.floor(parseInt(duration) / parseInt(interval)) : "?"} rounds</span>
+      </div>
+      <input placeholder="Notes…" value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: "10px" }} />
+      <div style={{ display: "flex", gap: "8px" }}>
+        <button onClick={onCancel} style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, color: T.textSub, borderRadius: "8px", padding: "8px", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+        <button onClick={save} disabled={!valid} style={{ flex: 2, background: valid ? "#7c3aed" : T.surface2, border: "none", color: valid ? "#fff" : T.textMuted, borderRadius: "8px", padding: "8px", fontSize: "12px", fontWeight: "700", cursor: valid ? "pointer" : "not-allowed", fontFamily: "inherit" }}>Add EMOM</button>
+      </div>
+    </div>
+  );
+}
+
+// --- Complex display card in session ---
+function ComplexCard({ complex, onRemove }) {
+  const isAmrap = complex.type === "amrap";
+  const bg = isAmrap ? "#fef3c7" : "#ede9fe";
+  const border = isAmrap ? "#f59e0b44" : "#7c3aed44";
+  const accent = isAmrap ? "#92400e" : "#4c1d95";
+  const badge = isAmrap ? "#f59e0b" : "#7c3aed";
+
+  return (
+    <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: "12px", padding: "12px 14px", marginBottom: "10px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+            <span style={{ background: badge, color: "#fff", fontSize: "10px", fontWeight: "800", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.08em" }}>{complex.type.toUpperCase()}</span>
+            <span style={{ fontSize: "13px", fontWeight: "700", color: accent }}>{complex.name}</span>
+            {complex.timeCap && <span style={{ fontSize: "11px", color: accent }}>· {complex.timeCap} min cap</span>}
+            {complex.duration && <span style={{ fontSize: "11px", color: accent }}>· {complex.duration} mins</span>}
+          </div>
+          <div style={{ fontSize: "12px", color: accent, marginBottom: "4px" }}>
+            {complex.exercises.map(e => `${e.reps ? e.reps + "× " : ""}${e.name}`).join(" → ")}
+          </div>
+          {complex.result && (
+            <div style={{ fontSize: "12px", fontWeight: "700", color: accent }}>
+              {isAmrap && complex.result.rounds !== null && `${complex.result.rounds} rounds${complex.result.extraReps ? ` + ${complex.result.extraReps} reps` : ""}`}
+              {!isAmrap && complex.result.completed !== null && `${complex.result.completed}/${complex.duration && complex.interval ? Math.floor(complex.duration / complex.interval) : "?"} rounds completed`}
+            </div>
+          )}
+          {complex.notes && <div style={{ fontSize: "11px", color: accent, fontStyle: "italic", marginTop: "4px" }}>"{complex.notes}"</div>}
+        </div>
+        <button onClick={onRemove} style={{ background: "none", border: "none", color: accent, cursor: "pointer", opacity: 0.5 }}><TrashIcon /></button>
+      </div>
+    </div>
+  );
+}
+
 // --- Session Logger ---
 function SessionLogger({ day, sessions, onSave, onClose }) {
   const today = new Date().toISOString().split("T")[0];
@@ -401,6 +572,9 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   const [notes, setNotes] = useState("");
   const [rpe, setRpe] = useState("");
   const [showScanner, setShowScanner] = useState(false);
+  const [showAmrap, setShowAmrap] = useState(false);
+  const [showEmom, setShowEmom] = useState(false);
+  const [complexes, setComplexes] = useState([]);
   const [saving, setSaving] = useState(false);
   const templates = EXERCISE_TEMPLATES[day.type] || [];
 
@@ -417,9 +591,9 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   }
 
   async function save() {
-    if (exercises.length === 0 || saving) return;
+    if ((exercises.length === 0 && complexes.length === 0) || saving) return;
     setSaving(true);
-    await onSave({ id: Date.now(), date, dayId: day.id, dayName: day.name, dayType: day.type, exercises, notes, rpe: rpe ? parseInt(rpe) : null });
+    await onSave({ id: Date.now(), date, dayId: day.id, dayName: day.name, dayType: day.type, exercises, complexes, notes, rpe: rpe ? parseInt(rpe) : null });
     setSaving(false);
     onClose();
   }
@@ -439,10 +613,28 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
 
           <button onClick={() => setShowScanner(true)} style={{
             width: "100%", background: "#ecfeff", border: "1px solid #a5f3fc",
-            borderRadius: "12px", padding: "14px", marginBottom: "20px",
+            borderRadius: "12px", padding: "14px", marginBottom: "10px",
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
             color: "#0891b2", fontSize: "13px", fontWeight: "700", letterSpacing: "0.06em", fontFamily: "inherit"
           }}><CameraIcon /> SCAN WHITEBOARD PHOTO</button>
+
+          {/* Complex buttons */}
+          <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+            <button onClick={() => { setShowAmrap(true); setShowEmom(false); }} style={{
+              flex: 1, background: "#fef3c7", border: "1px solid #f59e0b44", borderRadius: "10px",
+              padding: "10px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+              color: "#92400e", fontSize: "12px", fontWeight: "700", fontFamily: "inherit"
+            }}><ZapIcon /> AMRAP</button>
+            <button onClick={() => { setShowEmom(true); setShowAmrap(false); }} style={{
+              flex: 1, background: "#ede9fe", border: "1px solid #7c3aed44", borderRadius: "10px",
+              padding: "10px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+              color: "#4c1d95", fontSize: "12px", fontWeight: "700", fontFamily: "inherit"
+            }}><TimerIcon /> EMOM</button>
+          </div>
+
+          {showAmrap && <AmrapLogger onSave={c => { setComplexes(prev => [...prev, c]); setShowAmrap(false); }} onCancel={() => setShowAmrap(false)} />}
+          {showEmom && <EmomLogger onSave={c => { setComplexes(prev => [...prev, c]); setShowEmom(false); }} onCancel={() => setShowEmom(false)} />}
+          {complexes.map((c, i) => <ComplexCard key={i} complex={c} onRemove={() => setComplexes(prev => prev.filter((_, idx) => idx !== i))} />)}
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
             <div style={{ flex: 1, height: "1px", background: T.border }} />
@@ -486,16 +678,158 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
 
           <div style={{ display: "flex", gap: "10px" }}>
             <button onClick={onClose} style={{ flex: 1, background: T.surface2, border: `1px solid ${T.border}`, color: T.textSub, borderRadius: "10px", padding: "12px", fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "inherit" }}>CANCEL</button>
-            <button onClick={save} disabled={exercises.length === 0 || saving} style={{
-              flex: 2, background: exercises.length > 0 && !saving ? `linear-gradient(135deg, ${day.color}dd, ${day.color})` : T.surface2,
-              border: "none", color: exercises.length > 0 && !saving ? "#fff" : T.textMuted, borderRadius: "10px",
+            <button onClick={save} disabled={(exercises.length === 0 && complexes.length === 0) || saving} style={{
+              flex: 2, background: (exercises.length > 0 || complexes.length > 0) && !saving ? `linear-gradient(135deg, ${day.color}dd, ${day.color})` : T.surface2,
+              border: "none", color: (exercises.length > 0 || complexes.length > 0) && !saving ? "#fff" : T.textMuted, borderRadius: "10px",
               padding: "12px", fontSize: "13px", fontWeight: "800",
-              cursor: exercises.length > 0 && !saving ? "pointer" : "not-allowed", letterSpacing: "0.05em", fontFamily: "inherit"
+              cursor: (exercises.length > 0 || complexes.length > 0) && !saving ? "pointer" : "not-allowed", letterSpacing: "0.05em", fontFamily: "inherit"
             }}>{saving ? "SAVING…" : "SAVE SESSION"}</button>
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+
+// --- Calendar View ---
+function CalendarView({ sessions }) {
+  const today = new Date();
+  const [currentMonth, setCurrentMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+
+  // Build a map of date -> session
+  const sessionMap = {};
+  for (const s of sessions) {
+    if (!sessionMap[s.date]) sessionMap[s.date] = [];
+    sessionMap[s.date].push(s);
+  }
+
+  // Day type colours
+  const typeColor = {
+    recovery: "#16a34a",
+    lower_squat: "#2563eb",
+    upper: "#7c3aed",
+    lower_hinge: "#2563eb",
+    power: "#ea580c",
+    crossfit: "#dc2626",
+    cardio: "#16a34a",
+  };
+
+  // Days in month grid
+  const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  // Shift so Mon=0
+  const offset = (firstDay + 6) % 7;
+
+  const cells = [];
+  for (let i = 0; i < offset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  function dateStr(d) {
+    return `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  const todayStr = today.toISOString().split("T")[0];
+  const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+  // Stats for this month
+  const monthSessions = sessions.filter(s => s.date.startsWith(`${year}-${String(month+1).padStart(2,"0")}`));
+  const typeCounts = {};
+  for (const s of monthSessions) {
+    typeCounts[s.dayType] = (typeCounts[s.dayType] || 0) + 1;
+  }
+
+  return (
+    <div>
+      {/* Month nav */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: "8px", padding: "8px 14px", cursor: "pointer", fontSize: "16px", color: T.textSub }}>‹</button>
+        <div style={{ fontSize: "16px", fontWeight: "800", color: T.text }}>{monthNames[month]} {year}</div>
+        <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: "8px", padding: "8px 14px", cursor: "pointer", fontSize: "16px", color: T.textSub }}>›</button>
+      </div>
+
+      {/* Day labels */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "3px", marginBottom: "3px" }}>
+        {["M","T","W","T","F","S","S"].map((d, i) => (
+          <div key={i} style={{ textAlign: "center", fontSize: "11px", fontWeight: "700", color: T.textMuted, padding: "4px 0" }}>{d}</div>
+        ))}
+      </div>
+
+      {/* Calendar grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "3px", marginBottom: "24px" }}>
+        {cells.map((day, i) => {
+          if (!day) return <div key={i} />;
+          const ds = dateStr(day);
+          const daySessions = sessionMap[ds] || [];
+          const isToday = ds === todayStr;
+          const isFuture = ds > todayStr;
+          const colors = daySessions.map(s => typeColor[s.dayType] || "#94a3b8");
+
+          return (
+            <div key={i} style={{
+              background: isToday ? "#0f172a" : daySessions.length > 0 ? T.surface : isFuture ? T.bg : T.surface2,
+              border: `1px solid ${isToday ? "#0f172a" : daySessions.length > 0 ? colors[0] + "66" : T.border}`,
+              borderRadius: "8px", padding: "6px 4px", textAlign: "center", minHeight: "48px",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between"
+            }}>
+              <div style={{ fontSize: "12px", fontWeight: isToday ? "800" : "600", color: isToday ? "#fff" : isFuture ? T.textMuted : T.textSub }}>
+                {day}
+              </div>
+              {daySessions.length > 0 && (
+                <div style={{ display: "flex", gap: "2px", flexWrap: "wrap", justifyContent: "center" }}>
+                  {colors.map((c, ci) => (
+                    <div key={ci} style={{ width: "8px", height: "8px", borderRadius: "50%", background: c }} />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Month summary */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "16px", marginBottom: "16px" }}>
+        <div style={{ fontSize: "11px", color: T.textMuted, fontWeight: "700", letterSpacing: "0.1em", marginBottom: "12px" }}>
+          {monthNames[month].toUpperCase()} SUMMARY
+        </div>
+        <div style={{ fontSize: "24px", fontFamily: "'Bebas Neue', cursive", color: T.text, marginBottom: "12px" }}>
+          {monthSessions.length} <span style={{ fontSize: "14px", fontWeight: "400", fontFamily: "inherit", color: T.textSub }}>sessions</span>
+        </div>
+        {Object.keys(typeCounts).length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            {Object.entries(typeCounts).map(([type, count]) => {
+              const day = DAYS.find(d => d.type === type);
+              return (
+                <div key={type} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div style={{ width: "10px", height: "10px", borderRadius: "50%", background: typeColor[type] || "#94a3b8", flexShrink: 0 }} />
+                  <div style={{ fontSize: "12px", color: T.textSub, flex: 1 }}>{day?.name || type}</div>
+                  <div style={{ fontSize: "12px", fontWeight: "700", color: T.text }}>{count}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {monthSessions.length === 0 && (
+          <div style={{ fontSize: "13px", color: T.textMuted }}>No sessions this month yet.</div>
+        )}
+      </div>
+
+      {/* Legend */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "16px" }}>
+        <div style={{ fontSize: "11px", color: T.textMuted, fontWeight: "700", letterSpacing: "0.1em", marginBottom: "10px" }}>LEGEND</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+          {DAYS.filter((d, i, arr) => arr.findIndex(x => x.color === d.color && x.name === d.name) === i).map(day => (
+            <div key={day.id} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: day.color, flexShrink: 0 }} />
+              <div style={{ fontSize: "11px", color: T.textSub }}>{day.name}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -540,6 +874,14 @@ function HistoryView({ sessions, onDelete }) {
                   <span style={{ fontSize: "12px", color: T.textSub, marginLeft: "8px" }}>
                     {ex.sets.map(s => s.weight ? `${s.reps}×${s.weight}kg` : `${s.reps}`).join("  ")}
                   </span>
+                </div>
+              ))}
+              {(session.complexes || []).map((c, i) => (
+                <div key={i} style={{ marginBottom: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span style={{ background: c.type === "amrap" ? "#f59e0b" : "#7c3aed", color: "#fff", fontSize: "9px", fontWeight: "800", padding: "1px 6px", borderRadius: "8px" }}>{c.type.toUpperCase()}</span>
+                  <span style={{ fontSize: "13px", color: T.text, fontWeight: "600" }}>{c.name}</span>
+                  {c.result?.rounds != null && <span style={{ fontSize: "12px", color: T.textSub }}>{c.result.rounds}r+{c.result.extraReps || 0}</span>}
+                  {c.result?.completed != null && <span style={{ fontSize: "12px", color: T.textSub }}>{c.result.completed} rounds</span>}
                 </div>
               ))}
               {session.notes && <div style={{ fontSize: "12px", color: T.textMuted, fontStyle: "italic", marginTop: "6px" }}>"{session.notes}"</div>}
@@ -638,7 +980,7 @@ export default function WorkoutTracker() {
       ) : (
         <>
           <div style={{ display: "flex", gap: "6px", marginBottom: "24px" }}>
-            {[["log", "LOG SESSION"], ["history", "HISTORY & ANALYSIS"]].map(([v, label]) => (
+            {[["log", "LOG SESSION"], ["history", "HISTORY & ANALYSIS"], ["calendar", "CALENDAR"]].map(([v, label]) => (
               <button key={v} onClick={() => setView(v)} style={{
                 flex: 1, background: view === v ? T.text : "none",
                 border: `1px solid ${view === v ? T.text : T.border}`,
@@ -700,6 +1042,7 @@ export default function WorkoutTracker() {
           )}
 
           {view === "history" && <HistoryView sessions={sessions} onDelete={deleteSession} />}
+          {view === "calendar" && <CalendarView sessions={sessions} />}
         </>
       )}
 
