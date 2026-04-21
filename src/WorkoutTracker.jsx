@@ -106,7 +106,7 @@ const inputStyle = {
 const PlusIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
 const TrashIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>;
 const ChevronIcon = ({ open }) => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>;
-const BarChartIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg>;
+
 const DumbellIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="9" width="4" height="6" rx="1"/><rect x="18" y="9" width="4" height="6" rx="1"/><rect x="7" y="7" width="3" height="10" rx="1"/><rect x="14" y="7" width="3" height="10" rx="1"/><line x1="10" y1="12" x2="14" y2="12"/></svg>;
 const CalendarIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
 const CameraIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>;
@@ -125,41 +125,6 @@ function MiniSparkline({ data, color }) {
   const pts = data.map((v, i) => `${pad + (i / (data.length - 1)) * (w - pad * 2)},${h - pad - ((v - min) / range) * (h - pad * 2)}`).join(" ");
   const last = pts.split(" ").pop().split(",");
   return <svg width={w} height={h} style={{ display: "block" }}><polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><circle cx={last[0]} cy={last[1]} r="3" fill={color} /></svg>;
-}
-
-// --- AI Analyse ---
-function AnalyseButton({ sessions, onResult }) {
-  const [loading, setLoading] = useState(false);
-  async function analyse() {
-    if (sessions.length < 2) { onResult("Log at least 2 sessions before requesting analysis."); return; }
-    setLoading(true); onResult(null);
-    try {
-      const summary = sessions.slice(-20).map(s =>
-        `${s.date} (${s.dayName}): ${s.exercises.map(e => `${e.name} - ${e.sets.map(st => `${st.reps}r@${st.weight}kg`).join(", ")}`).join("; ")}${s.notes ? ` | Notes: ${s.notes}` : ""}`
-      ).join("\n");
-      const resp = await fetch("/api/proxy", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 1000,
-          system: "You are an expert strength and conditioning coach specialising in body recomposition and hypertrophy. The user is a 39-year-old male training for body recomposition — reducing fat while building significant lower body muscle mass. He trains from a home gym with dumbbells, pull-up bar, rowing machine, cycling machine. Weekly: Mon recovery, Tue lower squat, Wed upper, Thu lower hinge, Fri power, Sat CrossFit, Sun Zone 2. Intermediate/advanced understanding — be mechanistic, specific, practical. No generic advice.",
-          messages: [{ role: "user", content: `Recent sessions:\n\n${summary}\n\nAnalyse: 1) Progressive overload trends, 2) Weaknesses/imbalances, 3) Programme tweaks, 4) Priorities. Concise bullets.` }]
-        })
-      });
-      const data = await resp.json();
-      onResult(data.content?.find(b => b.type === "text")?.text || "No analysis returned.");
-    } catch { onResult("Analysis failed — please try again."); }
-    setLoading(false);
-  }
-  return (
-    <button onClick={analyse} disabled={loading} style={{
-      display: "flex", alignItems: "center", gap: "8px",
-      background: loading ? T.surface2 : "linear-gradient(135deg, #ea580c, #dc2626)",
-      color: loading ? T.textMuted : "#fff", border: loading ? `1px solid ${T.border}` : "none",
-      borderRadius: "10px", padding: "10px 18px",
-      cursor: loading ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: "700",
-      letterSpacing: "0.05em", opacity: loading ? 0.8 : 1, fontFamily: "inherit"
-    }}>{loading ? "Analysing…" : <><BarChartIcon /> AI ANALYSIS</>}</button>
-  );
 }
 
 // --- Whiteboard Scanner ---
@@ -571,6 +536,181 @@ function ComplexCard({ complex, onRemove }) {
   );
 }
 
+
+// --- Cardio Logger ---
+const CARDIO_ACTIVITIES = [
+  { id: "run", label: "Run", icon: "🏃", color: "#ea580c", unit: "km" },
+  { id: "bike", label: "Bike", icon: "🚴", color: "#2563eb", unit: "km" },
+  { id: "row", label: "Row", icon: "🚣", color: "#0891b2", unit: "m" },
+  { id: "swim", label: "Swim", icon: "🏊", color: "#7c3aed", unit: "m" },
+];
+
+function calcPace(activity, distRaw, timeMins) {
+  if (!distRaw || !timeMins || timeMins <= 0) return null;
+  const dist = parseFloat(distRaw);
+  if (!dist || dist <= 0) return null;
+
+  if (activity === "row" || activity === "swim") {
+    // pace per 500m
+    const distKm = dist / 1000;
+    const per500 = timeMins / (distKm * 2);
+    const mins = Math.floor(per500);
+    const secs = Math.round((per500 - mins) * 60);
+    return `${mins}:${String(secs).padStart(2,"0")} /500m`;
+  } else {
+    // pace per km
+    const distKm = activity === "bike" ? dist : dist;
+    const pacePerKm = timeMins / distKm;
+    const mins = Math.floor(pacePerKm);
+    const secs = Math.round((pacePerKm - mins) * 60);
+    if (activity === "bike") {
+      const kph = (distKm / timeMins * 60).toFixed(1);
+      return `${kph} km/h`;
+    }
+    return `${mins}:${String(secs).padStart(2,"0")} /km`;
+  }
+}
+
+function parseTime(str) {
+  // accepts "27:30", "27.5", "45" etc → decimal mins
+  if (!str) return null;
+  if (str.includes(":")) {
+    const [m, s] = str.split(":").map(Number);
+    return m + (s || 0) / 60;
+  }
+  return parseFloat(str) || null;
+}
+
+function CardioLogger({ onSave, onCancel }) {
+  const [activity, setActivity] = useState("run");
+  const [distance, setDistance] = useState("");
+  const [timeStr, setTimeStr] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const act = CARDIO_ACTIVITIES.find(a => a.id === activity);
+  const timeMins = parseTime(timeStr);
+  const pace = calcPace(activity, distance, timeMins);
+  const valid = distance && timeStr;
+
+  function save() {
+    onSave({
+      name: act.label,
+      type: "cardio_activity",
+      activity,
+      distance: parseFloat(distance),
+      distanceUnit: act.unit,
+      timeMins,
+      timeStr,
+      pace,
+      notes,
+    });
+  }
+
+  return (
+    <div style={{ background: "#f0fdf4", border: "1px solid #16a34a44", borderRadius: "14px", padding: "16px", marginBottom: "16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
+        <span style={{ fontSize: "16px" }}>{act.icon}</span>
+        <span style={{ fontSize: "12px", fontWeight: "800", color: "#14532d", letterSpacing: "0.08em" }}>CARDIO</span>
+      </div>
+
+      {/* Activity selector */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px", marginBottom: "14px" }}>
+        {CARDIO_ACTIVITIES.map(a => (
+          <button key={a.id} onClick={() => { setActivity(a.id); setDistance(""); setTimeStr(""); }}
+            style={{
+              background: activity === a.id ? a.color : T.surface,
+              border: `1px solid ${activity === a.id ? a.color : T.border}`,
+              color: activity === a.id ? "#fff" : T.textSub,
+              borderRadius: "8px", padding: "8px 4px", cursor: "pointer",
+              fontSize: "11px", fontWeight: "700", fontFamily: "inherit",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: "2px"
+            }}>
+            <span style={{ fontSize: "16px" }}>{a.icon}</span>
+            {a.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Distance + Time */}
+      <div style={{ display: "flex", gap: "10px", marginBottom: "12px" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: "11px", color: "#14532d", fontWeight: "700", marginBottom: "5px", letterSpacing: "0.08em" }}>
+            DISTANCE ({act.unit})
+          </div>
+          <input type="number" placeholder={act.unit === "m" ? "e.g. 2000" : "e.g. 5.6"} value={distance}
+            onChange={e => setDistance(e.target.value)}
+            style={{ ...inputStyle, width: "100%", borderColor: "#16a34a44" }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: "11px", color: "#14532d", fontWeight: "700", marginBottom: "5px", letterSpacing: "0.08em" }}>
+            TIME (mm:ss or mins)
+          </div>
+          <input placeholder="e.g. 27:30" value={timeStr}
+            onChange={e => setTimeStr(e.target.value)}
+            style={{ ...inputStyle, width: "100%", borderColor: "#16a34a44" }} />
+        </div>
+      </div>
+
+      {/* Auto pace */}
+      {pace && (
+        <div style={{ background: "#dcfce7", border: "1px solid #16a34a44", borderRadius: "8px", padding: "10px 14px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "14px" }}>⚡</span>
+          <span style={{ fontSize: "13px", fontWeight: "800", color: "#14532d" }}>{pace}</span>
+          <span style={{ fontSize: "12px", color: "#16a34a" }}>auto-calculated</span>
+        </div>
+      )}
+
+      <input placeholder="Notes (conditions, HR, etc.)…" value={notes} onChange={e => setNotes(e.target.value)}
+        style={{ ...inputStyle, width: "100%", marginBottom: "12px" }} />
+
+      <div style={{ display: "flex", gap: "8px" }}>
+        <button onClick={onCancel} style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, color: T.textSub, borderRadius: "8px", padding: "8px", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+        <button onClick={save} disabled={!valid} style={{
+          flex: 2, background: valid ? "#16a34a" : T.surface2, border: "none",
+          color: valid ? "#fff" : T.textMuted, borderRadius: "8px", padding: "8px",
+          fontSize: "12px", fontWeight: "700", cursor: valid ? "pointer" : "not-allowed", fontFamily: "inherit"
+        }}>Add {act.label}</button>
+      </div>
+    </div>
+  );
+}
+
+// --- Cardio Card (display in session logger and history) ---
+function CardioActivityCard({ cardio, onRemove }) {
+  const act = CARDIO_ACTIVITIES.find(a => a.id === cardio.activity) || CARDIO_ACTIVITIES[0];
+  return (
+    <div style={{ background: "#f0fdf4", border: "1px solid #16a34a44", borderRadius: "12px", padding: "12px 14px", marginBottom: "10px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+            <span style={{ fontSize: "14px" }}>{act.icon}</span>
+            <span style={{ fontSize: "13px", fontWeight: "700", color: "#14532d" }}>{act.label}</span>
+            <span style={{ background: "#16a34a", color: "#fff", fontSize: "10px", fontWeight: "800", padding: "1px 7px", borderRadius: "10px" }}>CARDIO</span>
+          </div>
+          <div style={{ display: "flex", gap: "16px" }}>
+            <div>
+              <div style={{ fontSize: "10px", color: "#16a34a", fontWeight: "700", letterSpacing: "0.08em" }}>DISTANCE</div>
+              <div style={{ fontSize: "14px", fontWeight: "800", color: "#14532d" }}>{cardio.distance}{cardio.distanceUnit}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: "10px", color: "#16a34a", fontWeight: "700", letterSpacing: "0.08em" }}>TIME</div>
+              <div style={{ fontSize: "14px", fontWeight: "800", color: "#14532d" }}>{cardio.timeStr}</div>
+            </div>
+            {cardio.pace && (
+              <div>
+                <div style={{ fontSize: "10px", color: "#16a34a", fontWeight: "700", letterSpacing: "0.08em" }}>PACE</div>
+                <div style={{ fontSize: "14px", fontWeight: "800", color: "#14532d" }}>{cardio.pace}</div>
+              </div>
+            )}
+          </div>
+          {cardio.notes && <div style={{ fontSize: "11px", color: "#16a34a", fontStyle: "italic", marginTop: "4px" }}>"{cardio.notes}"</div>}
+        </div>
+        {onRemove && <button onClick={onRemove} style={{ background: "none", border: "none", color: "#16a34a", cursor: "pointer", opacity: 0.5 }}><TrashIcon /></button>}
+      </div>
+    </div>
+  );
+}
+
 // --- Session Logger ---
 function SessionLogger({ day, sessions, onSave, onClose }) {
   const today = new Date().toISOString().split("T")[0];
@@ -582,7 +722,9 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   const [showScanner, setShowScanner] = useState(false);
   const [showAmrap, setShowAmrap] = useState(false);
   const [showEmom, setShowEmom] = useState(false);
+  const [showCardio, setShowCardio] = useState(false);
   const [complexes, setComplexes] = useState([]);
+  const [cardioActivities, setCardioActivities] = useState([]);
   const [saving, setSaving] = useState(false);
   const templates = EXERCISE_TEMPLATES[day.type] || [];
 
@@ -601,7 +743,7 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   async function save() {
     if ((exercises.length === 0 && complexes.length === 0) || saving) return;
     setSaving(true);
-    await onSave({ id: Date.now(), date, dayId: day.id, dayName: day.name, dayType: day.type, exercises, complexes, notes, rpe: rpe ? parseInt(rpe) : null });
+    await onSave({ id: Date.now(), date, dayId: day.id, dayName: day.name, dayType: day.type, exercises, complexes, cardioActivities, notes, rpe: rpe ? parseInt(rpe) : null });
     setSaving(false);
     onClose();
   }
@@ -626,23 +768,30 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
             color: "#0891b2", fontSize: "13px", fontWeight: "700", letterSpacing: "0.06em", fontFamily: "inherit"
           }}><CameraIcon /> SCAN WHITEBOARD PHOTO</button>
 
-          {/* Complex buttons */}
-          <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-            <button onClick={() => { setShowAmrap(true); setShowEmom(false); }} style={{
-              flex: 1, background: "#fef3c7", border: "1px solid #f59e0b44", borderRadius: "10px",
-              padding: "10px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-              color: "#92400e", fontSize: "12px", fontWeight: "700", fontFamily: "inherit"
+          {/* Complex + Cardio buttons */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px", marginBottom: "16px" }}>
+            <button onClick={() => { setShowAmrap(true); setShowEmom(false); setShowCardio(false); }} style={{
+              background: "#fef3c7", border: "1px solid #f59e0b44", borderRadius: "10px",
+              padding: "10px 4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
+              color: "#92400e", fontSize: "11px", fontWeight: "700", fontFamily: "inherit"
             }}><ZapIcon /> AMRAP</button>
-            <button onClick={() => { setShowEmom(true); setShowAmrap(false); }} style={{
-              flex: 1, background: "#ede9fe", border: "1px solid #7c3aed44", borderRadius: "10px",
-              padding: "10px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-              color: "#4c1d95", fontSize: "12px", fontWeight: "700", fontFamily: "inherit"
+            <button onClick={() => { setShowEmom(true); setShowAmrap(false); setShowCardio(false); }} style={{
+              background: "#ede9fe", border: "1px solid #7c3aed44", borderRadius: "10px",
+              padding: "10px 4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
+              color: "#4c1d95", fontSize: "11px", fontWeight: "700", fontFamily: "inherit"
             }}><TimerIcon /> EMOM</button>
+            <button onClick={() => { setShowCardio(true); setShowAmrap(false); setShowEmom(false); }} style={{
+              background: "#f0fdf4", border: "1px solid #16a34a44", borderRadius: "10px",
+              padding: "10px 4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
+              color: "#14532d", fontSize: "11px", fontWeight: "700", fontFamily: "inherit"
+            }}>🏃 CARDIO</button>
           </div>
 
           {showAmrap && <AmrapLogger onSave={c => { setComplexes(prev => [...prev, c]); setShowAmrap(false); }} onCancel={() => setShowAmrap(false)} />}
           {showEmom && <EmomLogger onSave={c => { setComplexes(prev => [...prev, c]); setShowEmom(false); }} onCancel={() => setShowEmom(false)} />}
+          {showCardio && <CardioLogger onSave={c => { setCardioActivities(prev => [...prev, c]); setShowCardio(false); }} onCancel={() => setShowCardio(false)} />}
           {complexes.map((c, i) => <ComplexCard key={i} complex={c} onRemove={() => setComplexes(prev => prev.filter((_, idx) => idx !== i))} />)}
+          {cardioActivities.map((c, i) => <CardioActivityCard key={i} cardio={c} onRemove={() => setCardioActivities(prev => prev.filter((_, idx) => idx !== i))} />)}
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
             <div style={{ flex: 1, height: "1px", background: T.border }} />
@@ -686,11 +835,11 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
 
           <div style={{ display: "flex", gap: "10px" }}>
             <button onClick={onClose} style={{ flex: 1, background: T.surface2, border: `1px solid ${T.border}`, color: T.textSub, borderRadius: "10px", padding: "12px", fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "inherit" }}>CANCEL</button>
-            <button onClick={save} disabled={(exercises.length === 0 && complexes.length === 0) || saving} style={{
-              flex: 2, background: (exercises.length > 0 || complexes.length > 0) && !saving ? `linear-gradient(135deg, ${day.color}dd, ${day.color})` : T.surface2,
-              border: "none", color: (exercises.length > 0 || complexes.length > 0) && !saving ? "#fff" : T.textMuted, borderRadius: "10px",
+            <button onClick={save} disabled={(exercises.length === 0 && complexes.length === 0 && cardioActivities.length === 0) || saving} style={{
+              flex: 2, background: (exercises.length > 0 || complexes.length > 0 || cardioActivities.length > 0) && !saving ? `linear-gradient(135deg, ${day.color}dd, ${day.color})` : T.surface2,
+              border: "none", color: (exercises.length > 0 || complexes.length > 0 || cardioActivities.length > 0) && !saving ? "#fff" : T.textMuted, borderRadius: "10px",
               padding: "12px", fontSize: "13px", fontWeight: "800",
-              cursor: (exercises.length > 0 || complexes.length > 0) && !saving ? "pointer" : "not-allowed", letterSpacing: "0.05em", fontFamily: "inherit"
+              cursor: (exercises.length > 0 || complexes.length > 0 || cardioActivities.length > 0) && !saving ? "pointer" : "not-allowed", letterSpacing: "0.05em", fontFamily: "inherit"
             }}>{saving ? "SAVING…" : "SAVE SESSION"}</button>
           </div>
         </div>
@@ -704,6 +853,7 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
 function CalendarView({ sessions }) {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [selectedDate, setSelectedDate] = useState(null);
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
@@ -720,10 +870,14 @@ function CalendarView({ sessions }) {
     recovery: "#16a34a",
     lower_squat: "#2563eb",
     upper: "#7c3aed",
+    upper_push: "#7c3aed",
+    upper_pull: "#0891b2",
     lower_hinge: "#2563eb",
     power: "#ea580c",
     crossfit: "#dc2626",
     cardio: "#16a34a",
+    olympic: "#dc2626",
+    flexible: "#94a3b8",
   };
 
   // Days in month grid
@@ -776,20 +930,24 @@ function CalendarView({ sessions }) {
           const isFuture = ds > todayStr;
           const colors = daySessions.map(s => typeColor[s.dayType] || "#94a3b8");
 
+          const isSelected = selectedDate === ds;
           return (
-            <div key={i} style={{
-              background: isToday ? "#0f172a" : daySessions.length > 0 ? T.surface : isFuture ? T.bg : T.surface2,
-              border: `1px solid ${isToday ? "#0f172a" : daySessions.length > 0 ? colors[0] + "66" : T.border}`,
-              borderRadius: "8px", padding: "6px 4px", textAlign: "center", minHeight: "48px",
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between"
-            }}>
-              <div style={{ fontSize: "12px", fontWeight: isToday ? "800" : "600", color: isToday ? "#fff" : isFuture ? T.textMuted : T.textSub }}>
+            <div key={i} onClick={() => daySessions.length > 0 ? setSelectedDate(isSelected ? null : ds) : null}
+              style={{
+                background: isSelected ? "#0f172a" : isToday ? "#1e293b" : daySessions.length > 0 ? T.surface : isFuture ? T.bg : T.surface2,
+                border: `1px solid ${isSelected ? "#0f172a" : isToday ? "#334155" : daySessions.length > 0 ? colors[0] + "66" : T.border}`,
+                borderRadius: "8px", padding: "6px 4px", textAlign: "center", minHeight: "48px",
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between",
+                cursor: daySessions.length > 0 ? "pointer" : "default",
+                transition: "all 0.15s"
+              }}>
+              <div style={{ fontSize: "12px", fontWeight: isToday || isSelected ? "800" : "600", color: isSelected || isToday ? "#fff" : isFuture ? T.textMuted : T.textSub }}>
                 {day}
               </div>
               {daySessions.length > 0 && (
                 <div style={{ display: "flex", gap: "2px", flexWrap: "wrap", justifyContent: "center" }}>
                   {colors.map((c, ci) => (
-                    <div key={ci} style={{ width: "8px", height: "8px", borderRadius: "50%", background: c }} />
+                    <div key={ci} style={{ width: "8px", height: "8px", borderRadius: "50%", background: isSelected ? "#fff" : c }} />
                   ))}
                 </div>
               )}
@@ -797,6 +955,53 @@ function CalendarView({ sessions }) {
           );
         })}
       </div>
+
+      {/* Selected day detail */}
+      {selectedDate && sessionMap[selectedDate] && (
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "16px", marginBottom: "16px", boxShadow: "0 4px 16px rgba(0,0,0,0.08)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+            <div style={{ fontSize: "13px", fontWeight: "800", color: T.text }}>{selectedDate}</div>
+            <button onClick={() => setSelectedDate(null)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", fontSize: "18px", lineHeight: 1 }}>×</button>
+          </div>
+          {sessionMap[selectedDate].map((session, si) => {
+            const dayDef = DAYS.find(d => d.id === session.dayId);
+            const color = dayDef?.color || "#2563eb";
+            return (
+              <div key={si} style={{ borderLeft: `3px solid ${color}`, paddingLeft: "12px", marginBottom: si < sessionMap[selectedDate].length - 1 ? "16px" : "0" }}>
+                <div style={{ fontSize: "11px", color, fontWeight: "700", letterSpacing: "0.08em", marginBottom: "6px" }}>{session.dayName?.toUpperCase()}</div>
+                {session.rpe && <div style={{ fontSize: "11px", color: "#ea580c", fontWeight: "600", marginBottom: "6px" }}>RPE {session.rpe}</div>}
+                {session.exercises?.map((ex, i) => (
+                  <div key={i} style={{ marginBottom: "5px" }}>
+                    <span style={{ fontSize: "13px", color: T.text, fontWeight: "600" }}>{ex.name}</span>
+                    <span style={{ fontSize: "12px", color: T.textSub, marginLeft: "8px" }}>
+                      {ex.sets?.map(s => s.weight ? `${s.reps}×${s.weight}kg` : `${s.reps}`).join("  ")}
+                    </span>
+                  </div>
+                ))}
+                {(session.cardioActivities || []).map((c, i) => {
+                  const act = CARDIO_ACTIVITIES.find(a => a.id === c.activity) || CARDIO_ACTIVITIES[0];
+                  return (
+                    <div key={i} style={{ marginBottom: "5px", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>{act.icon}</span>
+                      <span style={{ fontSize: "13px", color: T.text, fontWeight: "600" }}>{act.label}</span>
+                      <span style={{ fontSize: "12px", color: T.textSub }}>{c.distance}{c.distanceUnit} · {c.timeStr}</span>
+                      {c.pace && <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "600" }}>{c.pace}</span>}
+                    </div>
+                  );
+                })}
+                {(session.complexes || []).map((c, i) => (
+                  <div key={i} style={{ marginBottom: "5px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style={{ background: c.type === "amrap" ? "#f59e0b" : "#7c3aed", color: "#fff", fontSize: "9px", fontWeight: "800", padding: "1px 6px", borderRadius: "8px" }}>{c.type.toUpperCase()}</span>
+                    <span style={{ fontSize: "13px", color: T.text, fontWeight: "600" }}>{c.name}</span>
+                    {c.result?.rounds != null && <span style={{ fontSize: "12px", color: T.textSub }}>{c.result.rounds}r+{c.result.extraReps || 0}</span>}
+                  </div>
+                ))}
+                {session.notes && <div style={{ fontSize: "12px", color: T.textMuted, fontStyle: "italic", marginTop: "6px" }}>"{session.notes}"</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Month summary */}
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "14px", padding: "16px", marginBottom: "16px" }}>
@@ -956,7 +1161,6 @@ function EditSessionModal({ session, onSave, onClose }) {
 
 // --- History ---
 function HistoryView({ sessions, onDelete, onEdit }) {
-  const [analysis, setAnalysis] = useState(null);
   const [editingSession, setEditingSession] = useState(null);
   const sorted = [...sessions].sort((a, b) => b.date.localeCompare(a.date));
   return (
@@ -970,15 +1174,8 @@ function HistoryView({ sessions, onDelete, onEdit }) {
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <div style={{ fontSize: "13px", color: T.textSub }}>{sessions.length} sessions logged</div>
-        <AnalyseButton sessions={sessions} onResult={setAnalysis} />
       </div>
-      {analysis && (
-        <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "14px", padding: "18px", marginBottom: "20px" }}>
-          <div style={{ fontSize: "11px", color: "#ea580c", fontWeight: "700", letterSpacing: "0.1em", marginBottom: "10px" }}>AI ANALYSIS</div>
-          <div style={{ fontSize: "13px", color: T.text, lineHeight: "1.7", whiteSpace: "pre-wrap" }}>{analysis}</div>
-          <button onClick={() => setAnalysis(null)} style={{ marginTop: "12px", background: "none", border: "none", color: T.textMuted, fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Dismiss</button>
-        </div>
-      )}
+
       {sorted.length === 0 ? (
         <div style={{ textAlign: "center", color: T.textMuted, padding: "40px", fontSize: "14px" }}>No sessions yet. Tap a day to log your first session.</div>
       ) : sorted.map(session => {
@@ -1016,6 +1213,17 @@ function HistoryView({ sessions, onDelete, onEdit }) {
                   {c.result?.completed != null && <span style={{ fontSize: "12px", color: T.textSub }}>{c.result.completed} rounds</span>}
                 </div>
               ))}
+              {(session.cardioActivities || []).map((c, i) => {
+                const act = CARDIO_ACTIVITIES.find(a => a.id === c.activity) || CARDIO_ACTIVITIES[0];
+                return (
+                  <div key={i} style={{ marginBottom: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>{act.icon}</span>
+                    <span style={{ fontSize: "13px", color: T.text, fontWeight: "600" }}>{act.label}</span>
+                    <span style={{ fontSize: "12px", color: T.textSub }}>{c.distance}{c.distanceUnit} · {c.timeStr}</span>
+                    {c.pace && <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "600" }}>{c.pace}</span>}
+                  </div>
+                );
+              })}
               {session.notes && <div style={{ fontSize: "12px", color: T.textMuted, fontStyle: "italic", marginTop: "6px" }}>"{session.notes}"</div>}
             </div>
           </div>
