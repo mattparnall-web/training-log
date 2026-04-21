@@ -60,6 +60,13 @@ async function cloudInsert(session) {
 async function cloudDelete(id) {
   await sbFetch(`/sessions?id=eq.${id}`, { method: "DELETE" });
 }
+async function cloudUpdate(session) {
+  const rows = await sbFetch(`/sessions?id=eq.${session.id}`, {
+    method: "PATCH",
+    body: JSON.stringify(sessionToRow(session))
+  });
+  return rows?.[0] ? rowToSession(rows[0]) : session;
+}
 
 // --- DATA CONSTANTS ---
 const DAYS = [
@@ -73,13 +80,13 @@ const DAYS = [
 ];
 
 const EXERCISE_TEMPLATES = {
-  upper_push: ["Dumbbell Bench Press", "Overhead Press", "Incline Press", "Push-ups", "Dumbbell Shoulder Press", "Tricep Extension", "Chest Fly", "Arnold Press", "Close-grip Press", "Lateral Raise"],
-  lower_squat: ["Back Squat", "Front Squat", "Goblet Squat", "Bulgarian Split Squat", "Dumbbell Squat", "Step-ups", "Lunges", "Calf Raise", "Leg Press (DB)", "Box Squat"],
-  recovery: ["Mobility Work", "Foam Rolling", "Stretching", "Ice Bath", "Light Cycling", "Yoga Flow", "Breathwork"],
-  upper_pull: ["Pull-ups", "Dumbbell Row", "Barbell Deadlift", "Romanian Deadlift", "Face Pull", "Bicep Curl", "Lat Pulldown", "Single-Arm Row", "Shrug", "Hammer Curl"],
-  flexible: ["Pull-ups", "Dumbbell Bench Press", "Overhead Press", "Dumbbell Row", "Mobility Work", "Foam Rolling", "Ice Bath", "Light Cycling"],
-  olympic: ["Barbell Clean", "Power Clean", "Barbell Snatch", "Push Press", "Clean & Jerk", "Hang Clean", "Muscle Snatch", "Rowing (metres)", "Cycling (mins)", "Burpees", "Box Jumps", "Wall Balls", "Thrusters", "Double Unders"],
-  cardio: ["Cycling (mins)", "Rowing (mins)", "Walk/Jog", "Zone 2 Cycling"],
+  upper_push: ["BB Bench Press", "Incline DB Press", "Overhead DB Press", "Push-ups", "Ring Push-ups", "Paralette Push-ups", "Dips", "Ring Dips", "Tricep Extension", "Lateral Raise", "Arnold Press", "Close-grip Press", "Chest Fly"],
+  lower_squat: ["Back Squat", "Front Squat", "Goblet Squat", "KB Goblet Squat", "Bulgarian Split Squat", "Dumbbell Squat", "Step-ups", "Lunges", "Calf Raise", "Box Squat"],
+  recovery: ["Mobility Work", "Foam Rolling", "Stretching", "Ice Bath", "Light Cycling", "Yoga Flow", "Breathwork", "Ring Support Hold", "L-sit (Paralettes)"],
+  upper_pull: ["Pull-ups", "Weighted Pull-ups", "Ring Rows", "Single Arm DB Row", "Hex Bar Deadlift", "DB SLDL", "Barbell Deadlift", "Z-Bar Curl", "Hammer Curl", "Face Pull", "Shrug", "KB Swing"],
+  flexible: ["Pull-ups", "BB Bench Press", "Overhead DB Press", "Single Arm DB Row", "Mobility Work", "Foam Rolling", "Ice Bath", "Ring Support Hold", "L-sit (Paralettes)"],
+  olympic: ["Barbell Clean", "Power Clean", "Barbell Snatch", "Push Press", "Clean & Jerk", "Hang Clean", "Muscle Snatch", "KB Swing (20kg)", "KB Swing (24kg)", "KB Clean", "KB Snatch", "Wall Balls (9kg)", "Rowing (metres)", "Cycling (mins)", "Burpees", "Box Jumps", "Thrusters", "Double Unders"],
+  cardio: ["BikeErg (mins)", "Rowing (mins)", "Run", "Walk/Jog", "Zone 2 Cycling"],
 };
 
 const T = {
@@ -105,6 +112,7 @@ const CalendarIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill=
 const CameraIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>;
 const CheckIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>;
 const CloudIcon = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>;
+const EditIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
 const DuplicateIcon = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>;
 const TimerIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
 const ZapIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
@@ -833,12 +841,133 @@ function CalendarView({ sessions }) {
   );
 }
 
+
+// --- Edit Session Modal ---
+function EditSessionModal({ session, onSave, onClose }) {
+  const [exercises, setExercises] = useState(
+    session.exercises.map(ex => ({ ...ex, sets: ex.sets.map(s => ({ ...s })) }))
+  );
+  const [notes, setNotes] = useState(session.notes || "");
+  const [rpe, setRpe] = useState(session.rpe?.toString() || "");
+  const [saving, setSaving] = useState(false);
+
+  const day = DAYS.find(d => d.id === session.dayId) || DAYS[0];
+
+  function updateExName(i, name) {
+    setExercises(exs => exs.map((ex, idx) => idx === i ? { ...ex, name } : ex));
+  }
+  function updateSet(ei, si, field, val) {
+    setExercises(exs => exs.map((ex, idx) => idx === ei ? {
+      ...ex, sets: ex.sets.map((s, sidx) => sidx === si ? { ...s, [field]: val } : s)
+    } : ex));
+  }
+  function removeSet(ei, si) {
+    setExercises(exs => exs.map((ex, idx) => idx === ei ? {
+      ...ex, sets: ex.sets.filter((_, sidx) => sidx !== si)
+    } : ex));
+  }
+  function addSet(ei) {
+    setExercises(exs => exs.map((ex, idx) => idx === ei ? {
+      ...ex, sets: [...ex.sets, { reps: "", weight: "" }]
+    } : ex));
+  }
+  function duplicateSet(ei, si) {
+    setExercises(exs => exs.map((ex, idx) => idx === ei ? {
+      ...ex, sets: [...ex.sets.slice(0, si + 1), { ...ex.sets[si] }, ...ex.sets.slice(si + 1)]
+    } : ex));
+  }
+  function removeExercise(i) {
+    setExercises(exs => exs.filter((_, idx) => idx !== i));
+  }
+
+  async function save() {
+    setSaving(true);
+    await onSave({ ...session, exercises, notes, rpe: rpe ? parseInt(rpe) : null });
+    setSaving(false);
+    onClose();
+  }
+
+  const isCardio = ["cardio", "recovery", "crossfit"].includes(session.dayType);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: T.overlay, zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "20px", overflowY: "auto" }}>
+      <div style={{ background: T.surface, border: `1px solid ${day.color}44`, borderRadius: "16px", width: "100%", maxWidth: "520px", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.12)" }}>
+        <div style={{ marginBottom: "20px" }}>
+          <div style={{ fontSize: "11px", color: day.color, fontWeight: "700", letterSpacing: "0.1em", marginBottom: "4px" }}>EDIT SESSION</div>
+          <div style={{ fontSize: "18px", fontWeight: "800", color: T.text }}>{session.dayName} · {session.date}</div>
+        </div>
+
+        {exercises.map((ex, ei) => (
+          <div key={ei} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: "12px", marginBottom: "10px", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 14px 8px" }}>
+              <input value={ex.name} onChange={e => updateExName(ei, e.target.value)}
+                style={{ ...inputStyle, flex: 1, width: "auto", fontWeight: "700" }} />
+              <button onClick={() => removeExercise(ei)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer" }}><TrashIcon /></button>
+            </div>
+            <div style={{ padding: "0 14px 12px" }}>
+              {ex.sets.map((s, si) => (
+                <div key={si} style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "6px" }}>
+                  <span style={{ color: T.textMuted, fontSize: "12px", minWidth: "28px", fontWeight: "600" }}>#{si + 1}</span>
+                  {isCardio ? (
+                    <>
+                      <input type="number" placeholder="reps/mins" value={s.reps} onChange={e => updateSet(ei, si, "reps", e.target.value)} style={inputStyle} />
+                      <input type="text" placeholder="distance" value={s.weight} onChange={e => updateSet(ei, si, "weight", e.target.value)} style={{ ...inputStyle, width: "100px" }} />
+                    </>
+                  ) : (
+                    <>
+                      <input type="number" placeholder="reps" value={s.reps} onChange={e => updateSet(ei, si, "reps", e.target.value)} style={inputStyle} />
+                      <span style={{ color: T.textMuted, fontSize: "12px" }}>×</span>
+                      <input type="number" placeholder="kg" value={s.weight} onChange={e => updateSet(ei, si, "weight", e.target.value)} style={inputStyle} />
+                    </>
+                  )}
+                  <button onClick={() => duplicateSet(ei, si)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", padding: "2px" }}><DuplicateIcon /></button>
+                  <button onClick={() => removeSet(ei, si)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", padding: "2px" }}><TrashIcon /></button>
+                </div>
+              ))}
+              <button onClick={() => addSet(ei)} style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub, borderRadius: "8px", padding: "5px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>+ set</button>
+            </div>
+          </div>
+        ))}
+
+        <div style={{ display: "flex", gap: "10px", marginBottom: "16px", marginTop: "4px" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: "11px", color: T.textSub, fontWeight: "700", marginBottom: "6px", letterSpacing: "0.08em" }}>RPE</div>
+            <input type="number" min="1" max="10" placeholder="1-10" value={rpe} onChange={e => setRpe(e.target.value)} style={{ ...inputStyle, width: "100%" }} />
+          </div>
+          <div style={{ flex: 3 }}>
+            <div style={{ fontSize: "11px", color: T.textSub, fontWeight: "700", marginBottom: "6px", letterSpacing: "0.08em" }}>NOTES</div>
+            <input placeholder="Notes…" value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, width: "100%" }} />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button onClick={onClose} style={{ flex: 1, background: T.surface2, border: `1px solid ${T.border}`, color: T.textSub, borderRadius: "10px", padding: "12px", fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "inherit" }}>CANCEL</button>
+          <button onClick={save} disabled={saving} style={{
+            flex: 2, background: saving ? T.surface2 : `linear-gradient(135deg, ${day.color}dd, ${day.color})`,
+            border: "none", color: saving ? T.textMuted : "#fff", borderRadius: "10px",
+            padding: "12px", fontSize: "13px", fontWeight: "800",
+            cursor: saving ? "not-allowed" : "pointer", letterSpacing: "0.05em", fontFamily: "inherit"
+          }}>{saving ? "SAVING…" : "SAVE CHANGES"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- History ---
-function HistoryView({ sessions, onDelete }) {
+function HistoryView({ sessions, onDelete, onEdit }) {
   const [analysis, setAnalysis] = useState(null);
+  const [editingSession, setEditingSession] = useState(null);
   const sorted = [...sessions].sort((a, b) => b.date.localeCompare(a.date));
   return (
     <div>
+      {editingSession && (
+        <EditSessionModal
+          session={editingSession}
+          onSave={async updated => { await onEdit(updated); setEditingSession(null); }}
+          onClose={() => setEditingSession(null)}
+        />
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <div style={{ fontSize: "13px", color: T.textSub }}>{sessions.length} sessions logged</div>
         <AnalyseButton sessions={sessions} onResult={setAnalysis} />
@@ -866,7 +995,10 @@ function HistoryView({ sessions, onDelete }) {
                     {session.rpe && <span style={{ marginLeft: "8px", color: "#ea580c", fontWeight: "600" }}>RPE {session.rpe}</span>}
                   </div>
                 </div>
-                <button onClick={() => onDelete(session.id)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", padding: "4px" }}><TrashIcon /></button>
+                <div style={{ display: "flex", gap: "4px" }}>
+                  <button onClick={() => setEditingSession(session)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", padding: "4px" }}><EditIcon /></button>
+                  <button onClick={() => onDelete(session.id)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", padding: "4px" }}><TrashIcon /></button>
+                </div>
               </div>
               {session.exercises.map((ex, i) => (
                 <div key={i} style={{ marginBottom: "6px" }}>
@@ -929,6 +1061,18 @@ export default function WorkoutTracker() {
       setSyncStatus("saving");
       await cloudDelete(id);
       setSessions(prev => prev.filter(s => s.id !== id));
+      setSyncStatus("synced");
+    } catch (err) {
+      setLoadError(err.message);
+      setSyncStatus("error");
+    }
+  }
+
+  async function editSession(updated) {
+    try {
+      setSyncStatus("saving");
+      const saved = await cloudUpdate(updated);
+      setSessions(prev => prev.map(s => s.id === updated.id ? (saved || updated) : s));
       setSyncStatus("synced");
     } catch (err) {
       setLoadError(err.message);
@@ -1041,7 +1185,7 @@ export default function WorkoutTracker() {
             </>
           )}
 
-          {view === "history" && <HistoryView sessions={sessions} onDelete={deleteSession} />}
+          {view === "history" && <HistoryView sessions={sessions} onDelete={deleteSession} onEdit={editSession} />}
           {view === "calendar" && <CalendarView sessions={sessions} />}
         </>
       )}
