@@ -749,9 +749,10 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   }
 
   async function save() {
-    if ((exercises.length === 0 && complexes.length === 0 && cardioActivities.length === 0) || saving) return;
+    if ((exercises.length === 0 && complexes.length === 0 && cardioActivities.length === 0 && cardioRef.current.length === 0) || saving) return;
     setSaving(true);
-    await onSave({ id: Date.now(), date, dayId: day.id, dayName: day.name, dayType: day.type, exercises, complexes, cardioActivities, notes, rpe: rpe ? parseInt(rpe) : null });
+    const cardioToSave = cardioRef.current.length > 0 ? cardioRef.current : cardioActivities;
+    await onSave({ id: Date.now(), date, dayId: day.id, dayName: day.name, dayType: day.type, exercises, complexes, cardioActivities: cardioToSave, notes, rpe: rpe ? parseInt(rpe) : null });
     setSaving(false);
     onClose();
   }
