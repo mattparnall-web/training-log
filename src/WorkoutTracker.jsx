@@ -32,6 +32,8 @@ function rowToSession(r) {
     dayName: r.day_name,
     dayType: r.day_type,
     exercises: r.exercises || [],
+    complexes: r.complexes || [],
+    cardioActivities: r.cardio_activities || [],
     notes: r.notes || "",
     rpe: r.rpe
   };
@@ -43,7 +45,9 @@ function sessionToRow(s) {
     day_id: s.dayId,
     day_name: s.dayName,
     day_type: s.dayType,
-    exercises: s.exercises,
+    exercises: s.exercises || [],
+    complexes: s.complexes || [],
+    cardio_activities: s.cardioActivities || [],
     notes: s.notes || "",
     rpe: s.rpe
   };
@@ -725,14 +729,6 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   const [showCardio, setShowCardio] = useState(false);
   const [complexes, setComplexes] = useState([]);
   const [cardioActivities, setCardioActivities] = useState([]);
-  const cardioRef = useRef([]);
-
-  function addCardioActivity(c) {
-    const updated = [...cardioRef.current, c];
-    cardioRef.current = updated;
-    setCardioActivities(updated);
-    setShowCardio(false);
-  }
   const [saving, setSaving] = useState(false);
   const templates = EXERCISE_TEMPLATES[day.type] || [];
 
@@ -749,10 +745,9 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   }
 
   async function save() {
-    if ((exercises.length === 0 && complexes.length === 0 && cardioActivities.length === 0 && cardioRef.current.length === 0) || saving) return;
+    if ((exercises.length === 0 && complexes.length === 0 && cardioActivities.length === 0) || saving) return;
     setSaving(true);
-    const cardioToSave = cardioRef.current.length > 0 ? cardioRef.current : cardioActivities;
-    await onSave({ id: Date.now(), date, dayId: day.id, dayName: day.name, dayType: day.type, exercises, complexes, cardioActivities: cardioToSave, notes, rpe: rpe ? parseInt(rpe) : null });
+    await onSave({ id: Date.now(), date, dayId: day.id, dayName: day.name, dayType: day.type, exercises, complexes, cardioActivities, notes, rpe: rpe ? parseInt(rpe) : null });
     setSaving(false);
     onClose();
   }
@@ -798,7 +793,7 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
 
           {showAmrap && <AmrapLogger onSave={c => { setComplexes(prev => [...prev, c]); setShowAmrap(false); }} onCancel={() => setShowAmrap(false)} />}
           {showEmom && <EmomLogger onSave={c => { setComplexes(prev => [...prev, c]); setShowEmom(false); }} onCancel={() => setShowEmom(false)} />}
-          {showCardio && <CardioLogger onSave={addCardioActivity} onCancel={() => setShowCardio(false)} />}
+          {showCardio && <CardioLogger onSave={c => { setCardioActivities(prev => { const updated = [...prev, c]; return updated; }); setShowCardio(false); }} onCancel={() => setShowCardio(false)} />}
           {complexes.map((c, i) => <ComplexCard key={i} complex={c} onRemove={() => setComplexes(prev => prev.filter((_, idx) => idx !== i))} />)}
           {cardioActivities.map((c, i) => <CardioActivityCard key={i} cardio={c} onRemove={() => setCardioActivities(prev => prev.filter((_, idx) => idx !== i))} />)}
 
