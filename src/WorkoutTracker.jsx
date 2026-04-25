@@ -1340,7 +1340,7 @@ export default function WorkoutTracker() {
       ) : (
         <>
           <div style={{ display: "flex", gap: "6px", marginBottom: "24px" }}>
-            {[["log", "LOG SESSION"], ["history", "HISTORY & ANALYSIS"], ["calendar", "CALENDAR"]].map(([v, label]) => (
+            {[["log", "LOG SESSION"], ["history", "HISTORY"], ["calendar", "CALENDAR"]].map(([v, label]) => (
               <button key={v} onClick={() => setView(v)} style={{
                 flex: 1, background: view === v ? T.text : "none",
                 border: `1px solid ${view === v ? T.text : T.border}`,
