@@ -4,7 +4,6 @@ const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
 const SUPABASE_KEY = "sb_publishable__8dc2jqeQIClVXwpZQCSWA_Y5yaV1ao";
 
 export default async function handler(req) {
-  // Only allow GET
   if (req.method !== "GET") {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -22,7 +21,7 @@ export default async function handler(req) {
 
     const data = await resp.json();
 
-    // Format nicely for Claude to read
+    // Return all fields including cardio_activities and complexes
     const formatted = data.map(r => ({
       date: r.date,
       day: r.day_name,
@@ -30,6 +29,8 @@ export default async function handler(req) {
       rpe: r.rpe,
       notes: r.notes,
       exercises: r.exercises,
+      cardio_activities: r.cardio_activities,
+      complexes: r.complexes,
     }));
 
     return new Response(JSON.stringify(formatted, null, 2), {
