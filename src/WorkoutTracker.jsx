@@ -590,7 +590,7 @@ function CardioLogger({ onSave, onCancel }) {
   const act = CARDIO_ACTIVITIES.find(a => a.id === activity);
   const timeMins = parseTime(timeStr);
   const pace = calcPace(activity, distance, timeMins);
-  const valid = distance && timeStr;
+  const valid = distance !== '' && timeStr !== '' && parseFloat(distance) > 0;
 
   function save() {
     onSave({
@@ -637,7 +637,7 @@ function CardioLogger({ onSave, onCancel }) {
           <div style={{ fontSize: "11px", color: "#14532d", fontWeight: "700", marginBottom: "5px", letterSpacing: "0.08em" }}>
             DISTANCE ({act.unit})
           </div>
-          <input type="number" placeholder={act.unit === "m" ? "e.g. 2000" : "e.g. 5.6"} value={distance}
+          <input type="text" inputMode="decimal" placeholder={act.unit === "m" ? "e.g. 2000" : "e.g. 5.6"} value={distance}
             onChange={e => setDistance(e.target.value)}
             style={{ ...inputStyle, width: "100%", borderColor: "#16a34a44" }} />
         </div>
@@ -725,6 +725,14 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   const [showCardio, setShowCardio] = useState(false);
   const [complexes, setComplexes] = useState([]);
   const [cardioActivities, setCardioActivities] = useState([]);
+  const cardioRef = useRef([]);
+
+  function addCardioActivity(c) {
+    const updated = [...cardioRef.current, c];
+    cardioRef.current = updated;
+    setCardioActivities(updated);
+    setShowCardio(false);
+  }
   const [saving, setSaving] = useState(false);
   const templates = EXERCISE_TEMPLATES[day.type] || [];
 
@@ -789,7 +797,7 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
 
           {showAmrap && <AmrapLogger onSave={c => { setComplexes(prev => [...prev, c]); setShowAmrap(false); }} onCancel={() => setShowAmrap(false)} />}
           {showEmom && <EmomLogger onSave={c => { setComplexes(prev => [...prev, c]); setShowEmom(false); }} onCancel={() => setShowEmom(false)} />}
-          {showCardio && <CardioLogger onSave={c => { setCardioActivities(prev => [...prev, c]); setShowCardio(false); }} onCancel={() => setShowCardio(false)} />}
+          {showCardio && <CardioLogger onSave={addCardioActivity} onCancel={() => setShowCardio(false)} />}
           {complexes.map((c, i) => <ComplexCard key={i} complex={c} onRemove={() => setComplexes(prev => prev.filter((_, idx) => idx !== i))} />)}
           {cardioActivities.map((c, i) => <CardioActivityCard key={i} cardio={c} onRemove={() => setCardioActivities(prev => prev.filter((_, idx) => idx !== i))} />)}
 
