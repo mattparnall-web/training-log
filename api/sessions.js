@@ -38,6 +38,8 @@ export default async function handler(req) {
       headers: {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
       },
     });
   } catch (err) {
