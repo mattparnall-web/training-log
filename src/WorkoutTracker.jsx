@@ -75,9 +75,9 @@ async function cloudUpdate(session) {
 // --- DATA CONSTANTS ---
 const DAYS = [
   { id: "monday", label: "MON", name: "Upper Push", type: "upper_push", color: "#7c3aed" },
-  { id: "tuesday", label: "TUE", name: "Lower — Squat", type: "lower_squat", color: "#2563eb" },
+  { id: "tuesday", label: "TUE", name: "Upper Pull + Deadlifts", type: "upper_pull", color: "#0891b2" },
   { id: "wednesday", label: "WED", name: "Active Recovery", type: "recovery", color: "#16a34a" },
-  { id: "thursday", label: "THU", name: "Upper Pull + Deadlifts", type: "upper_pull", color: "#0891b2" },
+  { id: "thursday", label: "THU", name: "Lower — Squat", type: "lower_squat", color: "#2563eb" },
   { id: "friday", label: "FRI", name: "Flexible", type: "flexible", color: "#94a3b8" },
   { id: "saturday", label: "SAT", name: "Olympic Lifts + MetCon", type: "olympic", color: "#dc2626" },
   { id: "sunday", label: "SUN", name: "Zone 2 Cardio", type: "cardio", color: "#16a34a" },
