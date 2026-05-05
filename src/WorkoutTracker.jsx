@@ -75,22 +75,22 @@ async function cloudUpdate(session) {
 // --- DATA CONSTANTS ---
 const DAYS = [
   { id: "monday", label: "MON", name: "Upper Push", type: "upper_push", color: "#7c3aed" },
-  { id: "tuesday", label: "TUE", name: "Upper Pull + Deadlifts", type: "upper_pull", color: "#0891b2" },
+  { id: "tuesday", label: "TUE", name: "Lower — Squat", type: "lower_squat", color: "#2563eb" },
   { id: "wednesday", label: "WED", name: "Active Recovery", type: "recovery", color: "#16a34a" },
-  { id: "thursday", label: "THU", name: "Lower — Squat", type: "lower_squat", color: "#2563eb" },
+  { id: "thursday", label: "THU", name: "Upper Pull + Deadlifts", type: "upper_pull", color: "#0891b2" },
   { id: "friday", label: "FRI", name: "Flexible", type: "flexible", color: "#94a3b8" },
   { id: "saturday", label: "SAT", name: "Olympic Lifts + MetCon", type: "olympic", color: "#dc2626" },
   { id: "sunday", label: "SUN", name: "Zone 2 Cardio", type: "cardio", color: "#16a34a" },
 ];
 
 const EXERCISE_TEMPLATES = {
-  upper_push: ["BB Bench Press", "Incline DB Press", "Overhead DB Press", "Push-ups", "Ring Push-ups", "Paralette Push-ups", "Weighted Dips", "Ring Dips", "Tricep Extension", "Lateral Raise", "Arnold Press", "Close-grip Press", "Chest Fly", "Z-Bar Skullcrusher"],
-  upper_pull: ["Pull-ups", "Weighted Pull-ups (belt)", "Ring Rows", "Single Arm DB Row", "Barbell Deadlift", "Hex Bar Deadlift", "DB SLDL", "Z-Bar Curl", "Hammer Curl", "Face Pull", "Rear Delt Fly", "Shrug", "KB Swing (20kg)", "KB Swing (24kg)"],
-  recovery: ["Mobility Work", "Foam Rolling", "Stretching", "Ice Bath", "Light Cycling", "Yoga Flow", "Breathwork", "Ring Support Hold", "L-sit (Paralettes)", "Dead Hang"],
-  lower_squat: ["Back Squat", "Front Squat", "Goblet Squat", "KB Goblet Squat (20kg)", "KB Goblet Squat (24kg)", "Bulgarian Split Squat", "Dumbbell Squat", "Step-ups", "Lunges", "Calf Raise", "Box Squat", "Leg Press (DB)"],
-  flexible: ["Pull-ups", "Weighted Pull-ups (belt)", "BB Bench Press", "Overhead DB Press", "Single Arm DB Row", "Z-Bar Curl", "Tricep Extension", "Lateral Raise", "Mobility Work", "Foam Rolling", "Ice Bath", "Ring Support Hold", "L-sit (Paralettes)", "Ab Roller"],
-  olympic: ["Barbell Clean", "Power Clean", "Barbell Snatch", "Power Snatch", "Push Press", "Clean & Jerk", "Hang Clean", "Hang Snatch", "Muscle Snatch", "OHS", "Front Squat", "KB Swing (20kg)", "KB Swing (24kg)", "KB Clean (20kg)", "KB Snatch (20kg)", "Wall Balls (9kg)", "Rowing (metres)", "BikeErg (mins)", "Burpees", "Box Jumps", "Thrusters", "Double Unders", "Boxing Bag (rounds)"],
-  cardio: ["BikeErg (mins)", "Rowing (metres)", "Run (km)", "Walk/Jog", "Zone 2 BikeErg", "Zone 2 Row", "Swim (metres)"],
+  upper_push: ["BB Bench Press", "Incline DB Press", "Overhead DB Press", "Push-ups", "Ring Push-ups", "Paralette Push-ups", "Dips", "Ring Dips", "Tricep Extension", "Lateral Raise", "Arnold Press", "Close-grip Press", "Chest Fly"],
+  lower_squat: ["Back Squat", "Front Squat", "Goblet Squat", "KB Goblet Squat", "Bulgarian Split Squat", "Dumbbell Squat", "Step-ups", "Lunges", "Calf Raise", "Box Squat"],
+  recovery: ["Mobility Work", "Foam Rolling", "Stretching", "Ice Bath", "Light Cycling", "Yoga Flow", "Breathwork", "Ring Support Hold", "L-sit (Paralettes)"],
+  upper_pull: ["Pull-ups", "Weighted Pull-ups", "Ring Rows", "Single Arm DB Row", "Hex Bar Deadlift", "DB SLDL", "Barbell Deadlift", "Z-Bar Curl", "Hammer Curl", "Face Pull", "Shrug", "KB Swing"],
+  flexible: ["Pull-ups", "BB Bench Press", "Overhead DB Press", "Single Arm DB Row", "Mobility Work", "Foam Rolling", "Ice Bath", "Ring Support Hold", "L-sit (Paralettes)"],
+  olympic: ["Barbell Clean", "Power Clean", "Barbell Snatch", "Push Press", "Clean & Jerk", "Hang Clean", "Muscle Snatch", "KB Swing (20kg)", "KB Swing (24kg)", "KB Clean", "KB Snatch", "Wall Balls (9kg)", "Rowing (metres)", "Cycling (mins)", "Burpees", "Box Jumps", "Thrusters", "Double Unders"],
+  cardio: ["BikeErg (mins)", "Rowing (mins)", "Run", "Walk/Jog", "Zone 2 Cycling"],
 };
 
 const T = {
@@ -717,7 +717,7 @@ function CardioActivityCard({ cardio, onRemove }) {
 
 // --- Session Logger ---
 function SessionLogger({ day, sessions, onSave, onClose }) {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+  const today = new Date().toISOString().split("T")[0];
   const [date, setDate] = useState(today);
   const [exercises, setExercises] = useState([]);
   const [customExercise, setCustomExercise] = useState("");
@@ -898,7 +898,7 @@ function CalendarView({ sessions }) {
     return `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
 
-  const todayStr = today.toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+  const todayStr = today.toISOString().split("T")[0];
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
   // Stats for this month
@@ -1016,7 +1016,22 @@ function CalendarView({ sessions }) {
           {monthSessions.length} <span style={{ fontSize: "14px", fontWeight: "400", fontFamily: "inherit", color: T.textSub }}>sessions</span>
         </div>
         <div style={{ fontSize: "12px", color: T.textMuted, marginBottom: "12px" }}>
-          out of {Math.min(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" }).slice(8,10) | 0, new Date(year, month + 1, 0).getDate())} days so far this month
+          {(() => {
+            const todaySg = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+            const todaySgDate = new Date(todaySg);
+            const viewingMonth = year * 12 + month;
+            const currentMonth = todaySgDate.getFullYear() * 12 + todaySgDate.getMonth();
+            if (viewingMonth < currentMonth) {
+              // Past month — show full days in month
+              return `out of ${daysInMonth} days`;
+            } else if (viewingMonth === currentMonth) {
+              // Current month — show days elapsed so far
+              return `out of ${todaySgDate.getDate()} days so far this month`;
+            } else {
+              // Future month
+              return null;
+            }
+          })()}
         </div>
         {Object.keys(typeCounts).length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
