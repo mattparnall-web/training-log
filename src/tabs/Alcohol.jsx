@@ -164,7 +164,7 @@ export default function Alcohol() {
     <div style={{ padding: "20px", paddingBottom: "100px" }}>
       <div
         style={{
-          fontFamily: "'Bebas Neue', cursive",
+          fontFamily: "'Bebas Neue', sans-serif",
           fontSize: "36px",
           letterSpacing: "0.05em",
           color: T.text,

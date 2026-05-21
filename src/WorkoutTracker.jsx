@@ -1012,7 +1012,7 @@ function CalendarView({ sessions }) {
         <div style={{ fontSize: "11px", color: T.textMuted, fontWeight: "700", letterSpacing: "0.1em", marginBottom: "12px" }}>
           {monthNames[month].toUpperCase()} SUMMARY
         </div>
-        <div style={{ fontSize: "24px", fontFamily: "'Bebas Neue', cursive", color: T.text, marginBottom: "4px" }}>
+        <div style={{ fontSize: "24px", fontFamily: "'Bebas Neue', sans-serif", color: T.text, marginBottom: "4px" }}>
           {monthSessions.length} <span style={{ fontSize: "14px", fontWeight: "400", fontFamily: "inherit", color: T.textSub }}>sessions</span>
         </div>
         <div style={{ fontSize: "12px", color: T.textMuted, marginBottom: "12px" }}>
@@ -1327,7 +1327,7 @@ export default function WorkoutTracker() {
 
       <div style={{ marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: "36px", letterSpacing: "0.05em", color: T.text, lineHeight: 1 }}>COACH CLAUDE</div>
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "36px", letterSpacing: "0.05em", color: T.text, lineHeight: 1 }}>WORKOUT</div>
           <div style={{ display: "flex", alignItems: "center", gap: "5px", marginTop: "8px" }}>
             <span style={{ color: syncColor }}><CloudIcon /></span>
             <span style={{ fontSize: "10px", color: syncColor, fontWeight: "700", letterSpacing: "0.05em" }}>{syncLabel}</span>
@@ -1405,7 +1405,7 @@ export default function WorkoutTracker() {
                         {last && <div style={{ fontSize: "11px", color: T.textMuted, marginTop: "3px" }}>Last: {last.date}</div>}
                       </div>
                       <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: "24px", fontFamily: "'Bebas Neue', cursive", color: daySessions.length > 0 ? day.color : T.border }}>{daySessions.length}</div>
+                        <div style={{ fontSize: "24px", fontFamily: "'Bebas Neue', sans-serif", color: daySessions.length > 0 ? day.color : T.border }}>{daySessions.length}</div>
                         <div style={{ fontSize: "10px", color: T.textMuted }}>sessions</div>
                       </div>
                     </button>

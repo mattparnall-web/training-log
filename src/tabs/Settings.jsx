@@ -58,7 +58,7 @@ const sectionStyle = {
 };
 
 const sectionHeader = {
-  fontFamily: "'Bebas Neue', cursive",
+  fontFamily: "'Bebas Neue', sans-serif",
   fontSize: "20px",
   letterSpacing: "0.05em",
   color: T.text,
@@ -153,7 +153,7 @@ export default function Settings() {
     <div style={{ padding: "20px", paddingBottom: "100px" }}>
       <div
         style={{
-          fontFamily: "'Bebas Neue', cursive",
+          fontFamily: "'Bebas Neue', sans-serif",
           fontSize: "36px",
           letterSpacing: "0.05em",
           color: T.text,
