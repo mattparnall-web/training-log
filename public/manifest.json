@@ -1,7 +1,7 @@
 {
-  "name": "Training Log",
-  "short_name": "Training Log",
-  "description": "Personal workout tracker",
+  "name": "Coach",
+  "short_name": "Coach",
+  "description": "Personal training, nutrition, and coaching hub",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f8fafc",

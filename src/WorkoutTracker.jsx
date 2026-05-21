@@ -1327,7 +1327,7 @@ export default function WorkoutTracker() {
 
       <div style={{ marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: "36px", letterSpacing: "0.05em", color: T.text, lineHeight: 1 }}>TRAINING LOG</div>
+          <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: "36px", letterSpacing: "0.05em", color: T.text, lineHeight: 1 }}>COACH</div>
           <div style={{ display: "flex", alignItems: "center", gap: "5px", marginTop: "8px" }}>
             <span style={{ color: syncColor }}><CloudIcon /></span>
             <span style={{ fontSize: "10px", color: syncColor, fontWeight: "700", letterSpacing: "0.05em" }}>{syncLabel}</span>
