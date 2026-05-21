@@ -6,8 +6,7 @@ import {
   DateBar,
 } from "./_shared.jsx";
 
-// Weekly programme — mirrors WorkoutTracker's DAYS constant so we can compute
-// "today's planned session" without importing from the workout file.
+// ---- Weekly programme ----
 const DAYS = [
   { id: "monday",    label: "MON", name: "Upper Push",          type: "upper_push",  color: "#7c3aed" },
   { id: "tuesday",   label: "TUE", name: "Upper Pull + Deads",  type: "upper_pull",  color: "#0891b2" },
@@ -17,15 +16,35 @@ const DAYS = [
   { id: "saturday",  label: "SAT", name: "Olympic + MetCon",    type: "olympic",     color: "#dc2626" },
   { id: "sunday",    label: "SUN", name: "Zone 2 Cardio",       type: "cardio",      color: "#16a34a" },
 ];
-
 function dayDefFor(dateStr) {
-  // Monday-indexed lookup
   const dt = startOfDayLocal(dateStr);
   const idx = (dt.getDay() + 6) % 7;
   return DAYS[idx];
 }
 
-// ---------- Defensive extractors for Garmin response shapes ----------
+// ---- Anthropic proxy ----
+const PROXY_URL = "/api/proxy";
+const COACH_MODEL = "claude-sonnet-4-5";
+
+async function callClaudeText(systemPrompt, userPrompt, maxTokens = 1200) {
+  const r = await fetch(PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: COACH_MODEL,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
+    }),
+  });
+  if (!r.ok) throw new Error(`Proxy ${r.status}: ${await r.text()}`);
+  const json = await r.json();
+  const block = json?.content?.find?.((c) => c.type === "text");
+  if (!block?.text) throw new Error("Empty Claude response");
+  return block.text.trim();
+}
+
+// ---- Defensive Garmin extractors (same as before) ----
 function pickSleep(section) {
   const d = section?.data;
   if (!d) return null;
@@ -44,11 +63,9 @@ function pickSleep(section) {
     score,
   };
 }
-
 function pickBodyBattery(section) {
   const d = section?.data;
   if (!d) return null;
-  // get_body_battery returns either a list of day-arrays or a single day shape.
   const day = Array.isArray(d) ? d[0] : d;
   if (!day) return null;
   const values = day.bodyBatteryValuesArray || day.bodyBatteryValues || [];
@@ -60,15 +77,8 @@ function pickBodyBattery(section) {
     if (min == null || v < min) min = v;
     current = v;
   }
-  return {
-    charged: day.charged ?? null,
-    drained: day.drained ?? null,
-    current,
-    max,
-    min,
-  };
+  return { charged: day.charged ?? null, drained: day.drained ?? null, current, max, min };
 }
-
 function pickHRV(section) {
   const d = section?.data;
   if (!d) return null;
@@ -78,12 +88,8 @@ function pickHRV(section) {
     last_night_high: s.lastNightHigh ?? null,
     weekly_avg: s.weeklyAvg ?? null,
     status: s.status ?? null,
-    baseline_low: s.baseline?.lowUpper ?? null,
-    baseline_balanced_low: s.baseline?.balancedLow ?? null,
-    baseline_balanced_upper: s.baseline?.balancedUpper ?? null,
   };
 }
-
 function pickReadiness(section) {
   const d = section?.data;
   if (!d) return null;
@@ -98,11 +104,9 @@ function pickReadiness(section) {
     recovery_time: r.recoveryTime ?? null,
   };
 }
-
 function pickTrainingStatus(section) {
   const d = section?.data;
   if (!d) return null;
-  // The structure varies across firmwares. Try common shapes.
   const latest = d?.mostRecentTrainingStatus?.latestTrainingStatusData;
   if (latest) {
     const firstDevice = Object.values(latest)[0];
@@ -114,7 +118,6 @@ function pickTrainingStatus(section) {
   }
   return null;
 }
-
 function pickDailySummary(section) {
   const d = section?.data;
   if (!d) return null;
@@ -127,17 +130,131 @@ function pickDailySummary(section) {
   };
 }
 
-// ---------- Formatters ----------
+// ---- Helpers ----
 function hoursMinutes(seconds) {
   if (!seconds && seconds !== 0) return "—";
   const h = Math.floor(seconds / 3600);
   const m = Math.round((seconds - h * 3600) / 60);
   return `${h}h ${m}m`;
 }
-function valueOrDash(v, unit = "") {
-  return v == null ? "—" : `${v}${unit}`;
+function valueOrDash(v, unit = "") { return v == null ? "—" : `${v}${unit}`; }
+function round1(n) { return Math.round(n * 10) / 10; }
+
+function summariseSession(s) {
+  // Slim a session row down to a one-line text summary the coach can read.
+  const exParts = (s.exercises || [])
+    .slice(0, 6)
+    .map((ex) => {
+      const sets = (ex.sets || []).filter((set) => set.reps || set.weight);
+      const repSummary = sets.length
+        ? sets
+            .map((set) => `${set.reps || "?"}×${set.weight || "?"}`)
+            .join(", ")
+        : "(no sets)";
+      return `${ex.name}: ${repSummary}`;
+    })
+    .join(" | ");
+  return `${s.date} (${s.dayName || s.dayId}): ${exParts || "(no exercises)"}${s.rpe ? ` · RPE ${s.rpe}` : ""}${s.notes ? ` · ${s.notes}` : ""}`;
 }
 
+// ---- Coach prompt ----
+function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, yIntake }) {
+  const sleep = pickSleep(garmin?.sleep);
+  const bb = pickBodyBattery(garmin?.body_battery);
+  const hrv = pickHRV(garmin?.hrv);
+  const readiness = pickReadiness(garmin?.training_readiness);
+  const status = pickTrainingStatus(garmin?.training_status);
+
+  const keyLiftsText = (settings?.key_lifts || [])
+    .map((l) => `  - ${l.name}: target ${l.target_kg ?? "?"}kg`)
+    .join("\n") || "  (none configured)";
+
+  const recentText = recentSessions.length
+    ? recentSessions.map(summariseSession).join("\n  ")
+    : "  (no recent sessions logged)";
+
+  return `DATE: ${dateStr}
+DAY OF WEEK: ${day.label} — programme says: ${day.name}
+
+KEY LIFT TARGETS (athlete's current 1-rep targets or working weights):
+${keyLiftsText}
+
+NUTRITION TARGETS:
+  - Daily calories: ${settings?.daily_calorie_target ?? "not set"}
+  - Daily protein: ${settings?.daily_protein_target_g ?? "not set"} g
+  - Weekly alcohol units: ${settings?.weekly_alcohol_units_target ?? "not set"}
+
+LAST NIGHT / TODAY'S RECOVERY (from Garmin):
+  - Sleep: ${hoursMinutes(sleep?.duration_seconds)} (score: ${sleep?.score ?? "n/a"}); deep ${hoursMinutes(sleep?.deep_seconds)}, REM ${hoursMinutes(sleep?.rem_seconds)}
+  - HRV (last night): ${hrv?.last_night_avg ?? "n/a"}ms; status: ${hrv?.status ?? "n/a"}; 7d avg: ${hrv?.weekly_avg ?? "n/a"}
+  - Body Battery: current ${bb?.current ?? "n/a"}, range ${bb?.min ?? "?"}–${bb?.max ?? "?"}; charged ${bb?.charged ?? "?"}, drained ${bb?.drained ?? "?"}
+  - Training readiness: ${readiness?.score ?? "n/a"}/100 (${readiness?.level ?? "n/a"})
+  - Training status: ${status?.status ?? "n/a"}${status?.feedback ? ` — ${status.feedback}` : ""}
+
+YESTERDAY'S INTAKE:
+  - Calories: ${yIntake?.calories ?? 0} kcal
+  - Protein: ${yIntake?.protein_g ?? 0} g
+  - Alcohol: ${yIntake?.drinks ?? 0} drinks, ${yIntake?.units ?? 0} units
+
+RECENT SESSIONS (most recent first, up to 10):
+  ${recentText}`;
+}
+
+const COACH_SYSTEM_PROMPT = `You are an experienced strength & conditioning coach. The athlete is on a body-recomp protocol with a fixed weekly split:
+- Mon: Upper Push        - Tue: Upper Pull + Deadlifts
+- Wed: Active Recovery   - Thu: Lower — Squat
+- Fri: Flexible          - Sat: Olympic + MetCon
+- Sun: Zone 2 Cardio
+
+You will be given today's date, the athlete's recent training, last night's recovery data from Garmin, yesterday's nutrition + alcohol, and the athlete's current target weights for their key lifts.
+
+Your job: recommend TODAY'S SESSION, calibrated to recovery and recent load. Be specific and decisive.
+
+Hard rules:
+- Adapt intensity to readiness. Low HRV / poor sleep / low body battery / low readiness → scale back, focus on volume not load, or move some work to accessories. Strong recovery → push toward PRs.
+- Respect the planned day type unless recovery is genuinely poor (in which case suggest substituting a lighter session and say so).
+- Use the athlete's key lift targets as the reference for working weights; suggest specific percentages (e.g. "85% of target = 76kg").
+- Keep it realistic for a single ~60-minute session.
+- If yesterday's nutrition was well under calories or protein was way low, mention it briefly but don't lecture.
+
+Output format — produce exactly two sections, in this order:
+
+SUMMARY:
+<one or two sentences explaining your reasoning — what the recovery picture is and how today's session is calibrated to it.>
+
+SESSION:
+1. <Exercise name> — <sets> × <reps> @ <weight> kg
+2. ...
+(Aim for 4–7 exercises. Add a brief inline note after exercises where useful, in parentheses.)
+
+No headers, no markdown, no extra preamble. Just SUMMARY: then SESSION:.`;
+
+// ---- Parse Claude's response into summary + exercise list ----
+function parseCoachReply(text) {
+  const summaryMatch = text.match(/SUMMARY\s*:?\s*([\s\S]*?)(?:\n\s*SESSION\s*:?|$)/i);
+  const sessionMatch = text.match(/SESSION\s*:?\s*([\s\S]*)$/i);
+  return {
+    summary: summaryMatch ? summaryMatch[1].trim() : "",
+    session: sessionMatch ? sessionMatch[1].trim() : text,
+  };
+}
+
+// ---- Read recent sessions from training-log's existing endpoint ----
+async function fetchRecentSessions(limit = 10) {
+  try {
+    const r = await fetch("/api/sessions");
+    if (!r.ok) return [];
+    const all = await r.json();
+    // Endpoint returns date-sorted ascending; take the last N.
+    return all.slice(-limit).reverse();
+  } catch {
+    return [];
+  }
+}
+
+// ===========================================================================
+//                                DASHBOARD
+// ===========================================================================
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(todayString());
   const yesterdayStr = shiftDate(selectedDate, -1);
@@ -151,10 +268,16 @@ export default function Dashboard() {
   const [alcoholYesterday, setAlcoholYesterday] = useState([]);
   const [intakeLoading, setIntakeLoading] = useState(true);
 
+  // Coach plan state
+  const [plan, setPlan] = useState(null);             // { summary, session, model, created_at }
+  const [planLoading, setPlanLoading] = useState(true);
+  const [coachBusy, setCoachBusy] = useState(false);
+  const [coachError, setCoachError] = useState(null);
+
   const isToday = selectedDate === todayString();
   const day = dayDefFor(selectedDate);
 
-  // ---- Fetch the Garmin morning brief for the selected date ----
+  // ---- Garmin morning brief ----
   const loadGarmin = useCallback(async () => {
     setGarminLoading(true);
     setGarminError(null);
@@ -173,34 +296,115 @@ export default function Dashboard() {
     }
   }, [selectedDate]);
 
-  // ---- Fetch settings + yesterday's intake from Supabase ----
+  // ---- Settings + yesterday intake ----
   const loadIntake = useCallback(async () => {
     setIntakeLoading(true);
     try {
       const [settingsRows, food, drinks] = await Promise.all([
         sb("/settings?select=*&id=eq.1"),
-        sb(
-          `/food_entries?select=*&consumed_at=gte.${startOfDayLocal(yesterdayStr).toISOString()}&consumed_at=lte.${endOfDayLocal(yesterdayStr).toISOString()}`
-        ),
-        sb(
-          `/alcohol_entries?select=*&consumed_at=gte.${startOfDayLocal(yesterdayStr).toISOString()}&consumed_at=lte.${endOfDayLocal(yesterdayStr).toISOString()}`
-        ),
+        sb(`/food_entries?select=*&consumed_at=gte.${startOfDayLocal(yesterdayStr).toISOString()}&consumed_at=lte.${endOfDayLocal(yesterdayStr).toISOString()}`),
+        sb(`/alcohol_entries?select=*&consumed_at=gte.${startOfDayLocal(yesterdayStr).toISOString()}&consumed_at=lte.${endOfDayLocal(yesterdayStr).toISOString()}`),
       ]);
       setSettings(settingsRows?.[0] || null);
       setFoodYesterday(food || []);
       setAlcoholYesterday(drinks || []);
     } catch (e) {
-      // Non-fatal — dashboard still renders Garmin data.
       console.error("intake load failed:", e);
     } finally {
       setIntakeLoading(false);
     }
   }, [yesterdayStr]);
 
+  // ---- Saved plan for selectedDate ----
+  const loadPlan = useCallback(async () => {
+    setPlanLoading(true);
+    setCoachError(null);
+    try {
+      const rows = await sb(`/planned_sessions?select=*&date=eq.${selectedDate}`);
+      if (rows && rows.length > 0) {
+        const r = rows[0];
+        setPlan({
+          summary: r.summary || "",
+          session: r.plan_text || "",
+          model: r.model,
+          created_at: r.created_at,
+        });
+      } else {
+        setPlan(null);
+      }
+    } catch (e) {
+      console.error("plan load failed:", e);
+      setPlan(null);
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [selectedDate]);
+
   useEffect(() => { loadGarmin(); }, [loadGarmin]);
   useEffect(() => { loadIntake(); }, [loadIntake]);
+  useEffect(() => { loadPlan(); }, [loadPlan]);
 
-  // ---- Derived values ----
+  // ---- Generate plan ----
+  const planSession = async () => {
+    setCoachBusy(true);
+    setCoachError(null);
+    try {
+      const recentSessions = await fetchRecentSessions(10);
+      const yIntake = {
+        calories: Math.round(foodYesterday.reduce((a, e) => a + Number(e.calories || 0), 0)),
+        protein_g: Math.round(foodYesterday.reduce((a, e) => a + Number(e.protein_g || 0), 0)),
+        drinks: alcoholYesterday.length,
+        units: round1(alcoholYesterday.reduce((a, e) => a + Number(e.units || 0), 0)),
+      };
+      const userPrompt = buildCoachPrompt({
+        dateStr: selectedDate,
+        day,
+        settings,
+        garmin,
+        recentSessions,
+        yIntake,
+      });
+      const replyText = await callClaudeText(COACH_SYSTEM_PROMPT, userPrompt, 1400);
+      const parsed = parseCoachReply(replyText);
+
+      // Persist to Supabase, one row per date (upsert).
+      const row = {
+        date: selectedDate,
+        day_id: day.id,
+        day_name: day.name,
+        summary: parsed.summary,
+        plan_text: parsed.session,
+        model: COACH_MODEL,
+      };
+      await sb("/planned_sessions", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+        body: JSON.stringify(row),
+      });
+
+      setPlan({
+        summary: parsed.summary,
+        session: parsed.session,
+        model: COACH_MODEL,
+        created_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      setCoachError(e.message);
+    } finally {
+      setCoachBusy(false);
+    }
+  };
+
+  const clearPlan = async () => {
+    try {
+      await sb(`/planned_sessions?date=eq.${selectedDate}`, { method: "DELETE" });
+      setPlan(null);
+    } catch (e) {
+      setCoachError(e.message);
+    }
+  };
+
+  // ---- Derived ----
   const sleep = pickSleep(garmin?.sleep);
   const bb = pickBodyBattery(garmin?.body_battery);
   const hrv = pickHRV(garmin?.hrv);
@@ -219,10 +423,8 @@ export default function Dashboard() {
 
   return (
     <div style={{ padding: "20px", paddingBottom: "100px" }}>
-      {/* ---- Brand ---- */}
-      <div style={{ ...display, fontSize: "44px", marginBottom: "4px" }}>
-        COACH CLAUDE
-      </div>
+      {/* Brand */}
+      <div style={{ ...display, fontSize: "44px", marginBottom: "4px" }}>COACH CLAUDE</div>
       <div
         style={{
           fontSize: "10px",
@@ -235,7 +437,6 @@ export default function Dashboard() {
         TRAIN · EAT · RECOVER · REPEAT
       </div>
 
-      {/* ---- Date bar ---- */}
       <DateBar value={selectedDate} onChange={setSelectedDate} />
 
       <div style={{ ...display, fontSize: "26px", marginBottom: "4px" }}>
@@ -253,12 +454,11 @@ export default function Dashboard() {
         MORNING BRIEFING
       </div>
 
-      {/* ---- Today's session card ---- */}
+      {/* Session card with coach loop */}
       <Card>
-        <CardLabel>SESSION</CardLabel>
+        <CardLabel>SESSION · {day.label}</CardLabel>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "4px" }}>
           <div style={{ fontSize: "20px", fontWeight: 700, color: day.color }}>{day.name}</div>
-          <div style={{ fontSize: "12px", color: T.textMuted, letterSpacing: "0.1em", fontWeight: 700 }}>{day.label}</div>
         </div>
         {readiness?.score != null && (
           <div style={{ fontSize: "12px", color: T.textSub, marginTop: "8px" }}>
@@ -292,28 +492,53 @@ export default function Dashboard() {
             </div>
           </div>
         )}
-        <button
-          disabled
-          title="Coming in the next step — Claude reviews your data and proposes today's session"
-          style={{
-            marginTop: "14px",
-            width: "100%",
-            padding: "12px",
-            background: T.surface2,
-            border: `1px dashed ${T.border2}`,
-            color: T.textMuted,
-            borderRadius: "10px",
-            fontSize: "13px",
-            fontWeight: 700,
-            letterSpacing: "0.06em",
-            cursor: "not-allowed",
-          }}
-        >
-          ⏳ PLAN TODAY'S SESSION (coming next)
-        </button>
+
+        {/* ---- Coach output ---- */}
+        <div style={{ marginTop: "14px" }}>
+          {coachError && (
+            <div
+              style={{
+                background: "#fee2e2",
+                color: "#991b1b",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                marginBottom: "10px",
+                fontSize: "12px",
+              }}
+            >
+              {coachError}
+            </div>
+          )}
+
+          {planLoading ? (
+            <div style={{ fontSize: "13px", color: T.textSub }}>Checking for saved plan…</div>
+          ) : plan ? (
+            <CoachPlanView plan={plan} onRegenerate={planSession} onClear={clearPlan} busy={coachBusy} />
+          ) : (
+            <button
+              onClick={planSession}
+              disabled={coachBusy || garminLoading}
+              style={{
+                width: "100%",
+                padding: "14px",
+                background: coachBusy ? T.surface2 : T.accent,
+                color: coachBusy ? T.textMuted : "#fff",
+                border: "none",
+                borderRadius: "10px",
+                fontSize: "13px",
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                cursor: coachBusy ? "wait" : "pointer",
+                boxShadow: coachBusy ? "none" : "0 4px 12px rgba(234,88,12,0.25)",
+              }}
+            >
+              {coachBusy ? "COACH IS THINKING…" : "🧠 PLAN TODAY'S SESSION"}
+            </button>
+          )}
+        </div>
       </Card>
 
-      {/* ---- Garmin recovery cards ---- */}
+      {/* Recovery card */}
       <Card>
         <CardLabel>RECOVERY</CardLabel>
         {garminLoading ? (
@@ -324,31 +549,15 @@ export default function Dashboard() {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            <Metric
-              label="SLEEP"
-              big={hoursMinutes(sleep?.duration_seconds)}
-              sub={sleep?.score != null ? `Score: ${sleep.score}` : null}
-            />
-            <Metric
-              label="BODY BATTERY"
-              big={valueOrDash(bb?.current ?? bb?.max)}
-              sub={bb?.max != null && bb?.min != null ? `${bb.min}–${bb.max}` : null}
-            />
-            <Metric
-              label="HRV (LAST NIGHT)"
-              big={valueOrDash(hrv?.last_night_avg, "ms")}
-              sub={hrv?.status ? hrv.status : (hrv?.weekly_avg != null ? `7d avg ${hrv.weekly_avg}` : null)}
-            />
-            <Metric
-              label="TRAINING STATUS"
-              big={trainingStatus?.status || "—"}
-              sub={trainingStatus?.feedback ? trainingStatus.feedback.slice(0, 60) : null}
-            />
+            <Metric label="SLEEP" big={hoursMinutes(sleep?.duration_seconds)} sub={sleep?.score != null ? `Score: ${sleep.score}` : null} />
+            <Metric label="BODY BATTERY" big={valueOrDash(bb?.current ?? bb?.max)} sub={bb?.max != null && bb?.min != null ? `${bb.min}–${bb.max}` : null} />
+            <Metric label="HRV (LAST NIGHT)" big={valueOrDash(hrv?.last_night_avg, "ms")} sub={hrv?.status ? hrv.status : (hrv?.weekly_avg != null ? `7d avg ${hrv.weekly_avg}` : null)} />
+            <Metric label="TRAINING STATUS" big={trainingStatus?.status || "—"} sub={trainingStatus?.feedback ? trainingStatus.feedback.slice(0, 60) : null} />
           </div>
         )}
       </Card>
 
-      {/* ---- Yesterday's intake ---- */}
+      {/* Yesterday intake */}
       <Card>
         <CardLabel>YESTERDAY'S INTAKE</CardLabel>
         {intakeLoading ? (
@@ -371,26 +580,18 @@ export default function Dashboard() {
               label="DRINKS"
               big={yDrinks || "0"}
               sub={yUnits ? `${yUnits} units` : null}
-              tone={yUnits === 0 ? "ok" : yUnits < 4 ? "ok" : yUnits < 8 ? "over" : "over"}
+              tone={yUnits === 0 ? "ok" : yUnits < 4 ? "ok" : "over"}
             />
           </div>
         )}
       </Card>
 
-      {/* ---- Today's activity (selected date) ---- */}
       {daily && (
         <Card>
           <CardLabel>{isToday ? "TODAY · ACTIVITY" : prettyDate(selectedDate).toUpperCase()}</CardLabel>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            <Metric
-              label="STEPS"
-              big={valueOrDash(daily.steps)}
-              sub={daily.step_goal ? `Goal ${daily.step_goal}` : null}
-            />
-            <Metric
-              label="RESTING HR"
-              big={valueOrDash(daily.resting_heart_rate, " bpm")}
-            />
+            <Metric label="STEPS" big={valueOrDash(daily.steps)} sub={daily.step_goal ? `Goal ${daily.step_goal}` : null} />
+            <Metric label="RESTING HR" big={valueOrDash(daily.resting_heart_rate, " bpm")} />
           </div>
         </Card>
       )}
@@ -398,7 +599,7 @@ export default function Dashboard() {
   );
 }
 
-// ---- Helper components ----
+// ---- Subcomponents ----
 function Card({ children }) {
   return (
     <div
@@ -417,15 +618,7 @@ function Card({ children }) {
 
 function CardLabel({ children }) {
   return (
-    <div
-      style={{
-        fontSize: "10px",
-        letterSpacing: "0.2em",
-        color: T.textMuted,
-        fontWeight: 700,
-        marginBottom: "10px",
-      }}
-    >
+    <div style={{ fontSize: "10px", letterSpacing: "0.2em", color: T.textMuted, fontWeight: 700, marginBottom: "10px" }}>
       {children}
     </div>
   );
@@ -438,29 +631,109 @@ function Metric({ label, big, sub, tone }) {
     tone === "ok"    ? T.ok : T.text;
   return (
     <div>
-      <div
-        style={{
-          fontSize: "9px",
-          letterSpacing: "0.15em",
-          color: T.textMuted,
-          fontWeight: 700,
-          marginBottom: "4px",
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: "20px", fontWeight: 700, color: toneColor, lineHeight: 1 }}>
-        {big}
-      </div>
-      {sub && (
-        <div style={{ fontSize: "11px", color: T.textMuted, marginTop: "3px" }}>
-          {sub}
-        </div>
-      )}
+      <div style={{ fontSize: "9px", letterSpacing: "0.15em", color: T.textMuted, fontWeight: 700, marginBottom: "4px" }}>{label}</div>
+      <div style={{ fontSize: "20px", fontWeight: 700, color: toneColor, lineHeight: 1 }}>{big}</div>
+      {sub && <div style={{ fontSize: "11px", color: T.textMuted, marginTop: "3px" }}>{sub}</div>}
     </div>
   );
 }
 
-function round1(n) {
-  return Math.round(n * 10) / 10;
+function CoachPlanView({ plan, onRegenerate, onClear, busy }) {
+  return (
+    <div
+      style={{
+        background: "#0f172a",
+        borderRadius: "12px",
+        padding: "14px",
+        color: "#f1f5f9",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "10px",
+          letterSpacing: "0.2em",
+          color: "#fb923c",
+          fontWeight: 700,
+          marginBottom: "10px",
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+        }}
+      >
+        🧠 COACH CLAUDE SAYS
+      </div>
+
+      {plan.summary && (
+        <div
+          style={{
+            fontSize: "13px",
+            lineHeight: 1.55,
+            marginBottom: "12px",
+            color: "#e2e8f0",
+          }}
+        >
+          {plan.summary}
+        </div>
+      )}
+
+      <div
+        style={{
+          background: "rgba(255,255,255,0.05)",
+          borderRadius: "8px",
+          padding: "12px",
+          fontSize: "13px",
+          lineHeight: 1.65,
+          color: "#f1f5f9",
+          whiteSpace: "pre-wrap",
+          fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+        }}
+      >
+        {plan.session}
+      </div>
+
+      <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+        <button
+          onClick={onRegenerate}
+          disabled={busy}
+          style={{
+            flex: 1,
+            background: "transparent",
+            border: "1px solid #475569",
+            color: "#e2e8f0",
+            borderRadius: "8px",
+            padding: "8px",
+            fontSize: "11px",
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            cursor: busy ? "wait" : "pointer",
+          }}
+        >
+          {busy ? "REGENERATING…" : "🔄 REGENERATE"}
+        </button>
+        <button
+          onClick={onClear}
+          disabled={busy}
+          style={{
+            background: "transparent",
+            border: "1px solid #475569",
+            color: "#94a3b8",
+            borderRadius: "8px",
+            padding: "8px 14px",
+            fontSize: "11px",
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            cursor: busy ? "wait" : "pointer",
+          }}
+        >
+          DISCARD
+        </button>
+      </div>
+
+      {plan.created_at && (
+        <div style={{ fontSize: "10px", color: "#64748b", marginTop: "8px", textAlign: "right" }}>
+          generated {new Date(plan.created_at).toLocaleString()}
+        </div>
+      )}
+    </div>
+  );
 }
