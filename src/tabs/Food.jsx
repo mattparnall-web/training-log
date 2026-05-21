@@ -1,27 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-
-// ---- Supabase config ----
-const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
-const SUPABASE_KEY = "sb_publishable__8dc2jqeQIClVXwpZQCSWA_Y5yaV1ao";
-
-async function sb(path, options = {}) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-      ...(options.headers || {}),
-    },
-  });
-  if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`);
-  return r.status === 204 ? null : r.json();
-}
+import {
+  sb, T, display, inputStyle,
+  todayString, startOfDayLocal, endOfDayLocal,
+  noonOf, prettyDate, timeOf, dateStrOf,
+  SubTabs, DateBar, HistoryView, CalendarMonthView,
+} from "./_shared.jsx";
 
 // ---- Anthropic proxy (same one the whiteboard scanner uses) ----
 const PROXY_URL = "/api/proxy";
 const MODEL = "claude-sonnet-4-5";
+const LOOKBACK_DAYS = 90;
 
 async function callClaude(body) {
   const r = await fetch(PROXY_URL, {
@@ -67,7 +55,6 @@ function buildPhotoBody(base64) {
     ],
   };
 }
-
 function buildTextBody(userText) {
   return {
     model: MODEL,
@@ -81,17 +68,12 @@ function buildTextBody(userText) {
   };
 }
 
-// ---- Anthropic response → parsed JSON ----
 function extractAssistantText(resp) {
-  if (!resp || !resp.content) {
-    throw new Error("No content in Anthropic response");
-  }
-  // content is an array of blocks; pick the first text block
+  if (!resp || !resp.content) throw new Error("No content in Anthropic response");
   const block = resp.content.find((c) => c.type === "text");
   if (!block?.text) throw new Error("No text block in response");
   return block.text.trim();
 }
-
 function tryParseJSON(text) {
   try { return JSON.parse(text); } catch {}
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -105,7 +87,6 @@ function tryParseJSON(text) {
   throw new Error("Could not parse macros JSON from Claude's response");
 }
 
-// ---- Resize image on canvas before sending to Anthropic ----
 async function resizeAndEncode(file, maxDim = 1024, quality = 0.85) {
   const url = URL.createObjectURL(file);
   try {
@@ -122,7 +103,6 @@ async function resizeAndEncode(file, maxDim = 1024, quality = 0.85) {
     canvas.width = w;
     canvas.height = h;
     canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-
     const blob = await new Promise((resolve, reject) =>
       canvas.toBlob(
         (b) => (b ? resolve(b) : reject(new Error("Canvas blob failed"))),
@@ -141,60 +121,28 @@ async function resizeAndEncode(file, maxDim = 1024, quality = 0.85) {
   }
 }
 
-// ---- Design tokens (match the rest of the app) ----
-const T = {
-  bg: "#f8fafc", surface: "#ffffff", surface2: "#f1f5f9",
-  border: "#e2e8f0", border2: "#cbd5e1",
-  text: "#0f172a", textSub: "#475569", textMuted: "#94a3b8",
-  accent: "#ea580c",
-  ok: "#16a34a", amber: "#f59e0b", warn: "#dc2626",
-};
-
-const display = {
-  fontFamily: "'Bebas Neue', sans-serif",
-  letterSpacing: "0.04em",
-  color: T.text,
-  lineHeight: 1,
-};
-
-const inputStyle = {
-  background: T.surface,
-  border: `1px solid ${T.border2}`,
-  borderRadius: "8px",
-  color: T.text,
-  padding: "10px 12px",
-  fontSize: "16px",
-  fontFamily: "inherit",
-  width: "100%",
-  outline: "none",
-  boxSizing: "border-box",
-};
-
-function startOfDay(d = new Date()) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
 export default function Food() {
+  const [view, setView] = useState("log");
+  const [selectedDate, setSelectedDate] = useState(todayString());
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [calTarget, setCalTarget] = useState(null);
   const [proteinTarget, setProteinTarget] = useState(null);
   const [error, setError] = useState(null);
 
-  // Modal state for the parse-and-review flow
-  const [draft, setDraft] = useState(null); // { source, name, calories, protein_g, carbs_g, fat_g, confidence, ai_notes }
-  const [busyMode, setBusyMode] = useState(null); // 'photo' | 'text' | 'manual' | null
+  const [draft, setDraft] = useState(null);
+  const [busyMode, setBusyMode] = useState(null);
   const [textInput, setTextInput] = useState("");
   const [showTextEntry, setShowTextEntry] = useState(false);
   const fileInputRef = useRef(null);
 
-  // ---- Load today's entries + settings ----
+  const isToday = selectedDate === todayString();
+
   const load = useCallback(async () => {
     try {
       setError(null);
-      const since = startOfDay();
+      const since = new Date();
+      since.setDate(since.getDate() - LOOKBACK_DAYS);
       const rows = await sb(
         `/food_entries?select=*&consumed_at=gte.${since.toISOString()}&order=consumed_at.desc`
       );
@@ -219,12 +167,19 @@ export default function Food() {
     })();
   }, [load]);
 
-  // ---- Totals ----
-  const sum = (k) => entries.reduce((a, e) => a + Number(e[k] || 0), 0);
-  const todayCals = Math.round(sum("calories"));
-  const todayProtein = Math.round(sum("protein_g"));
-  const calPct = calTarget ? Math.min(100, Math.round((todayCals / calTarget) * 100)) : null;
-  const proteinPct = proteinTarget ? Math.min(100, Math.round((todayProtein / proteinTarget) * 100)) : null;
+  // ---- Filter entries to the selected day ----
+  const dayStartMs = startOfDayLocal(selectedDate).getTime();
+  const dayEndMs = endOfDayLocal(selectedDate).getTime();
+  const dayEntries = entries.filter((e) => {
+    const t = new Date(e.consumed_at).getTime();
+    return t >= dayStartMs && t <= dayEndMs;
+  });
+
+  const sum = (k) => dayEntries.reduce((a, e) => a + Number(e[k] || 0), 0);
+  const dayCals = Math.round(sum("calories"));
+  const dayProtein = Math.round(sum("protein_g"));
+  const calPct = calTarget ? Math.min(100, Math.round((dayCals / calTarget) * 100)) : null;
+  const proteinPct = proteinTarget ? Math.min(100, Math.round((dayProtein / proteinTarget) * 100)) : null;
 
   // ---- Actions ----
   const onPhotoSelected = async (file) => {
@@ -280,7 +235,9 @@ export default function Food() {
     if (!draft) return;
     setBusyMode("save");
     try {
+      const consumed = isToday ? new Date() : noonOf(selectedDate);
       const row = {
+        consumed_at: consumed.toISOString(),
         source: draft.source,
         name: draft.name?.trim() || "Untitled meal",
         calories: numOrNull(draft.calories),
@@ -313,6 +270,59 @@ export default function Food() {
     }
   };
 
+  // ---- Entry row renderer (shared by LOG / HISTORY / CALENDAR) ----
+  const renderEntryRow = (e) => (
+    <div
+      key={e.id}
+      style={{
+        background: T.surface,
+        border: `1px solid ${T.border}`,
+        borderRadius: "10px",
+        padding: "10px 12px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "10px",
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: "13px",
+            fontWeight: 600,
+            color: T.text,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {e.name}
+        </div>
+        <div style={{ fontSize: "11px", color: T.textMuted, marginTop: "2px" }}>
+          {e.calories ?? "?"} cal
+          {e.protein_g != null ? ` · P ${Number(e.protein_g).toFixed(0)}` : ""}
+          {e.carbs_g != null ? ` · C ${Number(e.carbs_g).toFixed(0)}` : ""}
+          {e.fat_g != null ? ` · F ${Number(e.fat_g).toFixed(0)}` : ""}
+          {" · "}{timeOf(e.consumed_at)}
+          {e.ai_confidence ? ` · ${e.ai_confidence}` : ""}
+        </div>
+      </div>
+      <button
+        onClick={() => deleteEntry(e.id)}
+        style={{
+          background: "transparent",
+          border: `1px solid ${T.border2}`,
+          color: T.textMuted,
+          borderRadius: "6px",
+          padding: "4px 8px",
+          fontSize: "12px",
+          cursor: "pointer",
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+
   return (
     <div style={{ padding: "20px", paddingBottom: "100px" }}>
       <div style={{ ...display, fontSize: "36px", marginBottom: "4px" }}>FOOD</div>
@@ -327,6 +337,16 @@ export default function Food() {
       >
         MEALS · DRINKS · MACROS
       </div>
+
+      <SubTabs
+        view={view}
+        onChange={setView}
+        tabs={[
+          ["log", "LOG"],
+          ["history", "HISTORY"],
+          ["calendar", "CALENDAR"],
+        ]}
+      />
 
       {error && (
         <div
@@ -343,238 +363,234 @@ export default function Food() {
         </div>
       )}
 
-      {/* ---- Today's totals ---- */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "10px",
-          marginBottom: "16px",
-        }}
-      >
-        <StatCard
-          label="CALORIES"
-          value={todayCals}
-          sub={calTarget ? `of ${calTarget}` : "no target set"}
-          progress={calPct}
-          color={calPct == null ? T.textMuted : calPct < 90 ? T.ok : calPct < 105 ? T.amber : T.warn}
-        />
-        <StatCard
-          label="PROTEIN (G)"
-          value={todayProtein}
-          sub={proteinTarget ? `of ${proteinTarget}` : "no target set"}
-          progress={proteinPct}
-          color={proteinPct == null ? T.textMuted : proteinPct < 80 ? T.amber : T.ok}
-        />
-      </div>
+      {/* =================== LOG VIEW =================== */}
+      {view === "log" && (
+        <>
+          <DateBar value={selectedDate} onChange={setSelectedDate} />
 
-      {/* ---- Log buttons ---- */}
-      <div style={{ marginBottom: "20px" }}>
-        <div
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.15em",
-            color: T.textMuted,
-            fontWeight: 600,
-            marginBottom: "10px",
-          }}
-        >
-          LOG A MEAL
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: "10px",
-          }}
-        >
-          <ActionButton
-            big="📷"
-            label="Photo"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!!busyMode}
-            busy={busyMode === "photo"}
-          />
-          <ActionButton
-            big="✏️"
-            label="Type"
-            onClick={() => setShowTextEntry((v) => !v)}
-            disabled={!!busyMode}
-            busy={busyMode === "text"}
-          />
-          <ActionButton
-            big="✍️"
-            label="Manual"
-            onClick={openManual}
-            disabled={!!busyMode}
-          />
-        </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={(e) => onPhotoSelected(e.target.files?.[0])}
-          style={{ display: "none" }}
-        />
-
-        {showTextEntry && (
           <div
             style={{
-              marginTop: "12px",
-              background: T.surface,
-              border: `1px solid ${T.border}`,
-              borderRadius: "10px",
-              padding: "12px",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "10px",
+              marginBottom: "16px",
             }}
           >
+            <StatCard
+              label="CALORIES"
+              value={dayCals}
+              sub={calTarget ? `of ${calTarget}` : "no target set"}
+              progress={calPct}
+              color={calPct == null ? T.textMuted : calPct < 90 ? T.ok : calPct < 105 ? T.amber : T.warn}
+            />
+            <StatCard
+              label="PROTEIN (G)"
+              value={dayProtein}
+              sub={proteinTarget ? `of ${proteinTarget}` : "no target set"}
+              progress={proteinPct}
+              color={proteinPct == null ? T.textMuted : proteinPct < 80 ? T.amber : T.ok}
+            />
+          </div>
+
+          <div style={{ marginBottom: "20px" }}>
             <div
               style={{
                 fontSize: "11px",
                 letterSpacing: "0.15em",
                 color: T.textMuted,
                 fontWeight: 600,
-                marginBottom: "6px",
+                marginBottom: "10px",
               }}
             >
-              DESCRIBE YOUR MEAL
+              LOG A MEAL{!isToday ? ` · FOR ${prettyDate(selectedDate).toUpperCase()}` : ""}
             </div>
-            <textarea
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              placeholder="e.g. Two eggs scrambled with butter on sourdough, half an avocado"
-              rows={3}
-              style={{ ...inputStyle, resize: "vertical", fontSize: "14px" }}
-            />
-            <button
-              onClick={onTextParse}
-              disabled={!textInput.trim() || busyMode === "text"}
+            <div
               style={{
-                marginTop: "8px",
-                width: "100%",
-                padding: "10px",
-                background: textInput.trim() ? T.accent : T.surface2,
-                color: textInput.trim() ? "#fff" : T.textMuted,
-                border: "none",
-                borderRadius: "8px",
-                fontSize: "13px",
-                fontWeight: 700,
-                letterSpacing: "0.05em",
-                cursor: textInput.trim() ? "pointer" : "default",
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: "10px",
               }}
             >
-              {busyMode === "text" ? "ANALYSING…" : "ESTIMATE MACROS"}
-            </button>
-          </div>
-        )}
+              <ActionButton
+                big="📷"
+                label="Photo"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!!busyMode}
+                busy={busyMode === "photo"}
+              />
+              <ActionButton
+                big="✏️"
+                label="Type"
+                onClick={() => setShowTextEntry((v) => !v)}
+                disabled={!!busyMode}
+                busy={busyMode === "text"}
+              />
+              <ActionButton
+                big="✍️"
+                label="Manual"
+                onClick={openManual}
+                disabled={!!busyMode}
+              />
+            </div>
 
-        {busyMode === "photo" && (
-          <div
-            style={{
-              marginTop: "12px",
-              padding: "12px",
-              textAlign: "center",
-              color: T.textSub,
-              fontSize: "13px",
-              background: T.surface2,
-              borderRadius: "8px",
-            }}
-          >
-            Analysing photo… Claude is estimating macros.
-          </div>
-        )}
-      </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={(e) => onPhotoSelected(e.target.files?.[0])}
+              style={{ display: "none" }}
+            />
 
-      {/* ---- Today's entries ---- */}
-      <div>
-        <div
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.15em",
-            color: T.textMuted,
-            fontWeight: 600,
-            marginBottom: "10px",
-          }}
-        >
-          TODAY
-        </div>
-        {loading ? (
-          <div style={{ color: T.textSub, fontSize: "13px" }}>Loading…</div>
-        ) : entries.length === 0 ? (
-          <div
-            style={{
-              padding: "20px",
-              background: T.surface2,
-              borderRadius: "10px",
-              color: T.textMuted,
-              fontSize: "13px",
-              textAlign: "center",
-            }}
-          >
-            Nothing logged today.
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            {entries.map((e) => (
+            {showTextEntry && (
               <div
-                key={e.id}
                 style={{
+                  marginTop: "12px",
                   background: T.surface,
                   border: `1px solid ${T.border}`,
                   borderRadius: "10px",
-                  padding: "10px 12px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "10px",
+                  padding: "12px",
                 }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      color: T.text,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {e.name}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: T.textMuted,
-                      marginTop: "2px",
-                    }}
-                  >
-                    {e.calories ?? "?"} cal
-                    {e.protein_g != null ? ` · P ${Number(e.protein_g).toFixed(0)}` : ""}
-                    {e.carbs_g != null ? ` · C ${Number(e.carbs_g).toFixed(0)}` : ""}
-                    {e.fat_g != null ? ` · F ${Number(e.fat_g).toFixed(0)}` : ""}
-                    {" · "}{timeOf(e.consumed_at)}
-                    {e.ai_confidence ? ` · ${e.ai_confidence}` : ""}
-                  </div>
-                </div>
-                <button
-                  onClick={() => deleteEntry(e.id)}
+                <div
                   style={{
-                    background: "transparent",
-                    border: `1px solid ${T.border2}`,
+                    fontSize: "11px",
+                    letterSpacing: "0.15em",
                     color: T.textMuted,
-                    borderRadius: "6px",
-                    padding: "4px 8px",
-                    fontSize: "12px",
-                    cursor: "pointer",
+                    fontWeight: 600,
+                    marginBottom: "6px",
                   }}
                 >
-                  ×
+                  DESCRIBE YOUR MEAL
+                </div>
+                <textarea
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="e.g. Two eggs scrambled with butter on sourdough, half an avocado"
+                  rows={3}
+                  style={{ ...inputStyle, resize: "vertical", fontSize: "14px", width: "100%" }}
+                />
+                <button
+                  onClick={onTextParse}
+                  disabled={!textInput.trim() || busyMode === "text"}
+                  style={{
+                    marginTop: "8px",
+                    width: "100%",
+                    padding: "10px",
+                    background: textInput.trim() ? T.accent : T.surface2,
+                    color: textInput.trim() ? "#fff" : T.textMuted,
+                    border: "none",
+                    borderRadius: "8px",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    letterSpacing: "0.05em",
+                    cursor: textInput.trim() ? "pointer" : "default",
+                  }}
+                >
+                  {busyMode === "text" ? "ANALYSING…" : "ESTIMATE MACROS"}
                 </button>
               </div>
-            ))}
+            )}
+
+            {busyMode === "photo" && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "12px",
+                  textAlign: "center",
+                  color: T.textSub,
+                  fontSize: "13px",
+                  background: T.surface2,
+                  borderRadius: "8px",
+                }}
+              >
+                Analysing photo… Claude is estimating macros.
+              </div>
+            )}
           </div>
-        )}
-      </div>
+
+          {/* Selected day's entries */}
+          <div>
+            <div
+              style={{
+                fontSize: "11px",
+                letterSpacing: "0.15em",
+                color: T.textMuted,
+                fontWeight: 600,
+                marginBottom: "10px",
+              }}
+            >
+              {isToday ? "TODAY" : prettyDate(selectedDate).toUpperCase()}
+            </div>
+            {loading ? (
+              <div style={{ color: T.textSub, fontSize: "13px" }}>Loading…</div>
+            ) : dayEntries.length === 0 ? (
+              <div
+                style={{
+                  padding: "20px",
+                  background: T.surface2,
+                  borderRadius: "10px",
+                  color: T.textMuted,
+                  fontSize: "13px",
+                  textAlign: "center",
+                }}
+              >
+                Nothing logged.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {dayEntries.map(renderEntryRow)}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* =================== HISTORY VIEW =================== */}
+      {view === "history" && (
+        <>
+          {loading ? (
+            <div style={{ color: T.textSub, fontSize: "13px" }}>Loading…</div>
+          ) : (
+            <HistoryView
+              entries={entries}
+              renderEntry={renderEntryRow}
+              emptyText="Nothing logged in the last 90 days."
+            />
+          )}
+        </>
+      )}
+
+      {/* =================== CALENDAR VIEW =================== */}
+      {view === "calendar" && (
+        <CalendarMonthView
+          entries={entries}
+          dotColorOf={() => T.accent}
+          onSelectDay={(ds) => {
+            setSelectedDate(ds);
+            setView("log");
+          }}
+          renderDayDetail={(dayEntries) => {
+            const cals = Math.round(dayEntries.reduce((a, e) => a + Number(e.calories || 0), 0));
+            const prot = Math.round(dayEntries.reduce((a, e) => a + Number(e.protein_g || 0), 0));
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {dayEntries.map(renderEntryRow)}
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: T.textMuted,
+                    marginTop: "4px",
+                    paddingTop: "8px",
+                    borderTop: `1px solid ${T.border}`,
+                  }}
+                >
+                  {dayEntries.length} entries · {cals} cal · {prot}g protein
+                </div>
+              </div>
+            );
+          }}
+        />
+      )}
 
       {/* ---- Review modal ---- */}
       {draft && (
@@ -590,7 +606,7 @@ export default function Food() {
   );
 }
 
-// ---- Subcomponents ----
+// ---------- Subcomponents ----------
 
 function ActionButton({ big, label, onClick, disabled, busy }) {
   return (
@@ -760,44 +776,12 @@ function ReviewSheet({ draft, onChange, onCancel, onSave, saving }) {
           </div>
         )}
 
-        <Field
-          label="Meal name"
-          value={draft.name}
-          onChange={(v) => set("name", v)}
-          placeholder="e.g. Chicken stir-fry"
-        />
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "10px",
-            marginTop: "10px",
-          }}
-        >
-          <Field
-            label="Calories"
-            type="number"
-            value={draft.calories}
-            onChange={(v) => set("calories", v)}
-          />
-          <Field
-            label="Protein (g)"
-            type="number"
-            value={draft.protein_g}
-            onChange={(v) => set("protein_g", v)}
-          />
-          <Field
-            label="Carbs (g)"
-            type="number"
-            value={draft.carbs_g}
-            onChange={(v) => set("carbs_g", v)}
-          />
-          <Field
-            label="Fat (g)"
-            type="number"
-            value={draft.fat_g}
-            onChange={(v) => set("fat_g", v)}
-          />
+        <Field label="Meal name" value={draft.name} onChange={(v) => set("name", v)} placeholder="e.g. Chicken stir-fry" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "10px" }}>
+          <Field label="Calories" type="number" value={draft.calories} onChange={(v) => set("calories", v)} />
+          <Field label="Protein (g)" type="number" value={draft.protein_g} onChange={(v) => set("protein_g", v)} />
+          <Field label="Carbs (g)" type="number" value={draft.carbs_g} onChange={(v) => set("carbs_g", v)} />
+          <Field label="Fat (g)" type="number" value={draft.fat_g} onChange={(v) => set("fat_g", v)} />
         </div>
 
         <button
@@ -847,7 +831,7 @@ function Field({ label, value, onChange, type = "text", placeholder = "" }) {
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        style={inputStyle}
+        style={{ ...inputStyle, fontSize: "16px", padding: "10px 12px", width: "100%" }}
       />
     </div>
   );
@@ -874,8 +858,4 @@ function numOrNull(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
-function timeOf(iso) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }

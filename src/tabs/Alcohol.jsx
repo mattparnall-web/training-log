@@ -1,49 +1,23 @@
 import { useState, useEffect, useCallback } from "react";
+import {
+  sb, T, display, inputStyle,
+  todayString, startOfDayLocal, endOfDayLocal,
+  startOfWeekFor, endOfWeekFor, noonOf, prettyDate, timeOf, dateStrOf,
+  SubTabs, DateBar, HistoryView, CalendarMonthView,
+} from "./_shared.jsx";
 
-// ----- Supabase config (same project / key as the rest of the app) -----
-const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
-const SUPABASE_KEY = "sb_publishable__8dc2jqeQIClVXwpZQCSWA_Y5yaV1ao";
-
-async function sb(path, options = {}) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-      ...(options.headers || {}),
-    },
-  });
-  if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`);
-  return r.status === 204 ? null : r.json();
-}
-
-const T = {
-  bg: "#f8fafc", surface: "#ffffff", surface2: "#f1f5f9",
-  border: "#e2e8f0", border2: "#cbd5e1",
-  text: "#0f172a", textSub: "#475569", textMuted: "#94a3b8",
-  accent: "#ea580c",
-  amber: "#f59e0b",
-  ok: "#16a34a",
-  warn: "#dc2626",
-};
-
-// ---- Drink catalogue ----
-// units = (volume_ml * abv_pct) / 1000
-// calories = roughly volume_ml * 0.4 for beer, * 0.83 for wine, * 2.2 for spirits, * 1.5 mixed cocktails
-// (close enough for tracking — actual values vary by brand)
+// ---- Drink catalogue (UK alcohol units + rough calories) ----
 const DRINKS = [
-  { type: "beer",     portion: "half_pint", label: "Half pint",     emoji: "🍺", units: 1.42, calories:  95, ml: 284, abv: 5 },
-  { type: "beer",     portion: "pint",      label: "Pint",          emoji: "🍺", units: 2.84, calories: 190, ml: 568, abv: 5 },
-  { type: "beer",     portion: "can",       label: "Can/bottle",    emoji: "🍻", units: 1.65, calories: 132, ml: 330, abv: 5 },
-  { type: "beer",     portion: "strong_pint", label: "Strong pint", emoji: "🍺", units: 3.41, calories: 230, ml: 568, abv: 6 },
-  { type: "wine",     portion: "small_glass",  label: "Small wine",  emoji: "🍷", units: 1.50, calories: 104, ml: 125, abv: 12 },
-  { type: "wine",     portion: "medium_glass", label: "Medium wine", emoji: "🍷", units: 2.10, calories: 145, ml: 175, abv: 12 },
-  { type: "wine",     portion: "large_glass",  label: "Large wine",  emoji: "🍷", units: 3.00, calories: 208, ml: 250, abv: 12 },
-  { type: "spirit",   portion: "single",  label: "Single",   emoji: "🥃", units: 1.00, calories:  55, ml:  25, abv: 40 },
-  { type: "spirit",   portion: "double",  label: "Double",   emoji: "🥃", units: 2.00, calories: 110, ml:  50, abv: 40 },
-  { type: "cocktail", portion: "standard", label: "Cocktail", emoji: "🍸", units: 2.00, calories: 200, ml:  50, abv: 40 },
+  { type: "beer",     portion: "half_pint",  label: "Half pint",  emoji: "🍺", units: 1.42, calories:  95 },
+  { type: "beer",     portion: "pint",       label: "Pint",       emoji: "🍺", units: 2.84, calories: 190 },
+  { type: "beer",     portion: "can",        label: "Can/bottle", emoji: "🍻", units: 1.65, calories: 132 },
+  { type: "beer",     portion: "strong_pint", label: "Strong pint", emoji: "🍺", units: 3.41, calories: 230 },
+  { type: "wine",     portion: "small_glass",  label: "Small wine",  emoji: "🍷", units: 1.50, calories: 104 },
+  { type: "wine",     portion: "medium_glass", label: "Medium wine", emoji: "🍷", units: 2.10, calories: 145 },
+  { type: "wine",     portion: "large_glass",  label: "Large wine",  emoji: "🍷", units: 3.00, calories: 208 },
+  { type: "spirit",   portion: "single",  label: "Single",   emoji: "🥃", units: 1.00, calories:  55 },
+  { type: "spirit",   portion: "double",  label: "Double",   emoji: "🥃", units: 2.00, calories: 110 },
+  { type: "cocktail", portion: "standard", label: "Cocktail", emoji: "🍸", units: 2.00, calories: 200 },
 ];
 
 const TYPE_COLOR = {
@@ -53,32 +27,26 @@ const TYPE_COLOR = {
   cocktail: "#0891b2",
 };
 
-// ---- date helpers (Singapore timezone-aware-ish: use local) ----
-function startOfDay(d = new Date()) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-function startOfWeek(d = new Date()) {
-  const x = startOfDay(d);
-  const day = (x.getDay() + 6) % 7; // Monday = 0
-  x.setDate(x.getDate() - day);
-  return x;
-}
+// How far back to fetch on mount. ~3 months is enough for the typical calendar browse.
+const LOOKBACK_DAYS = 90;
 
 export default function Alcohol() {
+  const [view, setView] = useState("log");
+  const [selectedDate, setSelectedDate] = useState(todayString());
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [logging, setLogging] = useState(null); // drink portion key in flight
+  const [logging, setLogging] = useState(null);
   const [weeklyTarget, setWeeklyTarget] = useState(null);
   const [error, setError] = useState(null);
 
+  const isToday = selectedDate === todayString();
+
+  // ---- Load LOOKBACK_DAYS of entries ----
   const load = useCallback(async () => {
     try {
       setError(null);
-      // Last 8 days is enough for today + this week's running total.
       const since = new Date();
-      since.setDate(since.getDate() - 8);
+      since.setDate(since.getDate() - LOOKBACK_DAYS);
       const rows = await sb(
         `/alcohol_entries?select=*&consumed_at=gte.${since.toISOString()}&order=consumed_at.desc`
       );
@@ -90,36 +58,35 @@ export default function Alcohol() {
     }
   }, []);
 
-  // ---- Load entries + weekly target ----
   useEffect(() => {
     (async () => {
       try {
         const settings = await sb("/settings?select=weekly_alcohol_units_target&id=eq.1");
         const t = settings?.[0]?.weekly_alcohol_units_target;
         setWeeklyTarget(typeof t === "number" ? t : null);
-      } catch {
-        // Settings table optional — ignore failure.
-      }
+      } catch {}
       load();
     })();
   }, [load]);
 
-  // ---- Totals ----
-  const todayStart = startOfDay().getTime();
-  const weekStart = startOfWeek().getTime();
+  // ---- Totals for the selected day + its week ----
+  const dayStartMs = startOfDayLocal(selectedDate).getTime();
+  const dayEndMs = endOfDayLocal(selectedDate).getTime();
+  const weekStartMs = startOfWeekFor(selectedDate).getTime();
+  const weekEndMs = endOfWeekFor(selectedDate).getTime();
 
-  const todayEntries = entries.filter(
-    (e) => new Date(e.consumed_at).getTime() >= todayStart
-  );
-  const weekEntries = entries.filter(
-    (e) => new Date(e.consumed_at).getTime() >= weekStart
-  );
+  const dayEntries = entries.filter((e) => {
+    const t = new Date(e.consumed_at).getTime();
+    return t >= dayStartMs && t <= dayEndMs;
+  });
+  const weekEntries = entries.filter((e) => {
+    const t = new Date(e.consumed_at).getTime();
+    return t >= weekStartMs && t <= weekEndMs;
+  });
 
-  const sum = (arr, key) =>
-    arr.reduce((acc, e) => acc + Number(e[key] || 0), 0);
-
-  const todayUnits = round1(sum(todayEntries, "units"));
-  const todayCals = Math.round(sum(todayEntries, "calories"));
+  const sum = (arr, key) => arr.reduce((acc, e) => acc + Number(e[key] || 0), 0);
+  const dayUnits = round1(sum(dayEntries, "units"));
+  const dayCals = Math.round(sum(dayEntries, "calories"));
   const weekUnits = round1(sum(weekEntries, "units"));
 
   const weeklyPct = weeklyTarget
@@ -130,7 +97,9 @@ export default function Alcohol() {
   const quickLog = async (drink) => {
     setLogging(`${drink.type}_${drink.portion}`);
     try {
+      const consumed = isToday ? new Date() : noonOf(selectedDate);
       const row = {
+        consumed_at: consumed.toISOString(),
         drink_type: drink.type,
         portion: drink.portion,
         display_label: drink.label,
@@ -141,7 +110,6 @@ export default function Alcohol() {
         method: "POST",
         body: JSON.stringify(row),
       });
-      // Optimistically prepend.
       setEntries((prev) => [created[0], ...prev]);
     } catch (e) {
       setError(e.message);
@@ -156,33 +124,75 @@ export default function Alcohol() {
       await sb(`/alcohol_entries?id=eq.${id}`, { method: "DELETE" });
     } catch (e) {
       setError(e.message);
-      load(); // re-sync from server on failure
+      load();
     }
   };
 
-  return (
-    <div style={{ padding: "20px", paddingBottom: "100px" }}>
-      <div
+  // ---- Render an entry row (used by LOG/HISTORY/CALENDAR) ----
+  const renderEntryRow = (e) => (
+    <div
+      key={e.id}
+      style={{
+        background: T.surface,
+        border: `1px solid ${T.border}`,
+        borderLeft: `3px solid ${TYPE_COLOR[e.drink_type] || T.accent}`,
+        borderRadius: "8px",
+        padding: "10px 12px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "10px",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+        <div style={{ fontSize: "13px", fontWeight: 600, color: T.text }}>
+          {e.display_label || `${e.drink_type} (${e.portion})`}
+        </div>
+        <div style={{ fontSize: "11px", color: T.textMuted }}>
+          {Number(e.units).toFixed(1)} units · {e.calories} cal · {timeOf(e.consumed_at)}
+        </div>
+      </div>
+      <button
+        onClick={() => deleteEntry(e.id)}
         style={{
-          fontFamily: "'Bebas Neue', sans-serif",
-          fontSize: "36px",
-          letterSpacing: "0.05em",
-          color: T.text,
-          marginBottom: "4px",
+          background: "transparent",
+          border: `1px solid ${T.border2}`,
+          color: T.textMuted,
+          borderRadius: "6px",
+          padding: "4px 8px",
+          fontSize: "12px",
+          cursor: "pointer",
         }}
       >
-        ALCOHOL
-      </div>
+        ×
+      </button>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "20px", paddingBottom: "100px" }}>
+      <div style={{ ...display, fontSize: "36px", marginBottom: "4px" }}>ALCOHOL</div>
       <div
         style={{
           fontSize: "11px",
           color: T.textMuted,
           letterSpacing: "0.15em",
           marginBottom: "16px",
+          fontWeight: 600,
         }}
       >
         QUICK-TAP · UK UNITS
       </div>
+
+      <SubTabs
+        view={view}
+        onChange={setView}
+        tabs={[
+          ["log", "LOG"],
+          ["history", "HISTORY"],
+          ["calendar", "CALENDAR"],
+        ]}
+      />
 
       {error && (
         <div
@@ -199,159 +209,185 @@ export default function Alcohol() {
         </div>
       )}
 
-      {/* ---- Totals row ---- */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "10px",
-          marginBottom: "16px",
-        }}
-      >
-        <StatCard label="TODAY" value={`${todayUnits} units`} sub={`${todayCals} cal`} />
-        <StatCard
-          label="THIS WEEK"
-          value={`${weekUnits} units`}
-          sub={weeklyTarget ? `of ${weeklyTarget} target` : "no target set"}
-          progress={weeklyPct}
-          color={
-            weeklyPct == null ? T.textMuted :
-            weeklyPct < 70 ? T.ok :
-            weeklyPct < 100 ? T.amber : T.warn
-          }
-        />
-      </div>
+      {/* =================== LOG VIEW =================== */}
+      {view === "log" && (
+        <>
+          <DateBar value={selectedDate} onChange={setSelectedDate} />
 
-      {/* ---- Quick-tap grid ---- */}
-      <div style={{ marginBottom: "20px" }}>
-        <div
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.15em",
-            color: T.textMuted,
-            fontWeight: 600,
-            marginBottom: "10px",
-          }}
-        >
-          TAP TO LOG
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "10px",
-          }}
-        >
-          {DRINKS.map((d) => {
-            const busy = logging === `${d.type}_${d.portion}`;
-            return (
-              <button
-                key={`${d.type}_${d.portion}`}
-                onClick={() => quickLog(d)}
-                disabled={!!logging}
-                style={{
-                  background: T.surface,
-                  border: `1px solid ${T.border}`,
-                  borderLeft: `4px solid ${TYPE_COLOR[d.type] || T.accent}`,
-                  borderRadius: "10px",
-                  padding: "12px",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  gap: "4px",
-                  cursor: logging ? "wait" : "pointer",
-                  fontFamily: "inherit",
-                  textAlign: "left",
-                  opacity: logging && !busy ? 0.5 : 1,
-                  transition: "transform 0.08s",
-                  transform: busy ? "scale(0.97)" : "scale(1)",
-                }}
-              >
-                <div style={{ fontSize: "20px", lineHeight: 1 }}>{d.emoji}</div>
-                <div style={{ fontSize: "14px", fontWeight: 700, color: T.text }}>
-                  {d.label}
-                </div>
-                <div style={{ fontSize: "11px", color: T.textMuted, letterSpacing: "0.05em" }}>
-                  {d.units} units · {d.calories} cal
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ---- Today's entries ---- */}
-      <div>
-        <div
-          style={{
-            fontSize: "11px",
-            letterSpacing: "0.15em",
-            color: T.textMuted,
-            fontWeight: 600,
-            marginBottom: "10px",
-          }}
-        >
-          TODAY'S ENTRIES
-        </div>
-        {loading ? (
-          <div style={{ color: T.textSub, fontSize: "13px" }}>Loading…</div>
-        ) : todayEntries.length === 0 ? (
+          {/* Totals row */}
           <div
             style={{
-              padding: "20px",
-              background: T.surface2,
-              borderRadius: "10px",
-              color: T.textMuted,
-              fontSize: "13px",
-              textAlign: "center",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "10px",
+              marginBottom: "16px",
             }}
           >
-            Nothing logged today.
+            <StatCard
+              label={isToday ? "TODAY" : prettyDate(selectedDate).toUpperCase()}
+              value={`${dayUnits} units`}
+              sub={`${dayCals} cal`}
+            />
+            <StatCard
+              label="WEEK"
+              value={`${weekUnits} units`}
+              sub={weeklyTarget ? `of ${weeklyTarget} target` : "no target set"}
+              progress={weeklyPct}
+              color={
+                weeklyPct == null
+                  ? T.textMuted
+                  : weeklyPct < 70
+                  ? T.ok
+                  : weeklyPct < 100
+                  ? T.amber
+                  : T.warn
+              }
+            />
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            {todayEntries.map((e) => (
+
+          {/* Quick-tap grid */}
+          <div style={{ marginBottom: "20px" }}>
+            <div
+              style={{
+                fontSize: "11px",
+                letterSpacing: "0.15em",
+                color: T.textMuted,
+                fontWeight: 600,
+                marginBottom: "10px",
+              }}
+            >
+              TAP TO LOG{!isToday ? ` · FOR ${prettyDate(selectedDate).toUpperCase()}` : ""}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+              }}
+            >
+              {DRINKS.map((d) => {
+                const busy = logging === `${d.type}_${d.portion}`;
+                return (
+                  <button
+                    key={`${d.type}_${d.portion}`}
+                    onClick={() => quickLog(d)}
+                    disabled={!!logging}
+                    style={{
+                      background: T.surface,
+                      border: `1px solid ${T.border}`,
+                      borderLeft: `4px solid ${TYPE_COLOR[d.type] || T.accent}`,
+                      borderRadius: "10px",
+                      padding: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      gap: "4px",
+                      cursor: logging ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      textAlign: "left",
+                      opacity: logging && !busy ? 0.5 : 1,
+                      transition: "transform 0.08s",
+                      transform: busy ? "scale(0.97)" : "scale(1)",
+                    }}
+                  >
+                    <div style={{ fontSize: "20px", lineHeight: 1 }}>{d.emoji}</div>
+                    <div style={{ fontSize: "14px", fontWeight: 700, color: T.text }}>
+                      {d.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: T.textMuted,
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      {d.units} units · {d.calories} cal
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Selected day's entries */}
+          <div>
+            <div
+              style={{
+                fontSize: "11px",
+                letterSpacing: "0.15em",
+                color: T.textMuted,
+                fontWeight: 600,
+                marginBottom: "10px",
+              }}
+            >
+              {isToday ? "TODAY'S ENTRIES" : prettyDate(selectedDate).toUpperCase()}
+            </div>
+            {loading ? (
+              <div style={{ color: T.textSub, fontSize: "13px" }}>Loading…</div>
+            ) : dayEntries.length === 0 ? (
               <div
-                key={e.id}
                 style={{
-                  background: T.surface,
-                  border: `1px solid ${T.border}`,
-                  borderLeft: `3px solid ${TYPE_COLOR[e.drink_type] || T.accent}`,
-                  borderRadius: "8px",
-                  padding: "10px 12px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "10px",
+                  padding: "20px",
+                  background: T.surface2,
+                  borderRadius: "10px",
+                  color: T.textMuted,
+                  fontSize: "13px",
+                  textAlign: "center",
                 }}
               >
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: T.text }}>
-                    {e.display_label || `${e.drink_type} (${e.portion})`}
-                  </div>
-                  <div style={{ fontSize: "11px", color: T.textMuted }}>
-                    {Number(e.units).toFixed(1)} units · {e.calories} cal · {timeOf(e.consumed_at)}
-                  </div>
-                </div>
-                <button
-                  onClick={() => deleteEntry(e.id)}
-                  style={{
-                    background: "transparent",
-                    border: `1px solid ${T.border2}`,
-                    color: T.textMuted,
-                    borderRadius: "6px",
-                    padding: "4px 8px",
-                    fontSize: "12px",
-                    cursor: "pointer",
-                  }}
-                >
-                  ×
-                </button>
+                Nothing logged.
               </div>
-            ))}
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {dayEntries.map(renderEntryRow)}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
+
+      {/* =================== HISTORY VIEW =================== */}
+      {view === "history" && (
+        <>
+          {loading ? (
+            <div style={{ color: T.textSub, fontSize: "13px" }}>Loading…</div>
+          ) : (
+            <HistoryView
+              entries={entries}
+              renderEntry={renderEntryRow}
+              emptyText="Nothing logged in the last 90 days."
+            />
+          )}
+        </>
+      )}
+
+      {/* =================== CALENDAR VIEW =================== */}
+      {view === "calendar" && (
+        <CalendarMonthView
+          entries={entries}
+          dotColorOf={(e) => TYPE_COLOR[e.drink_type] || T.accent}
+          onSelectDay={(ds) => {
+            setSelectedDate(ds);
+            setView("log");
+          }}
+          renderDayDetail={(dayEntries) => (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              {dayEntries.map(renderEntryRow)}
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: T.textMuted,
+                  marginTop: "4px",
+                  paddingTop: "8px",
+                  borderTop: `1px solid ${T.border}`,
+                }}
+              >
+                {dayEntries.length} drinks · {round1(dayEntries.reduce((a, e) => a + Number(e.units || 0), 0))} units · {Math.round(dayEntries.reduce((a, e) => a + Number(e.calories || 0), 0))} cal
+              </div>
+            </div>
+          )}
+        />
+      )}
     </div>
   );
 }
@@ -401,8 +437,4 @@ function StatCard({ label, value, sub, progress, color }) {
 
 function round1(n) {
   return Math.round(n * 10) / 10;
-}
-function timeOf(iso) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
