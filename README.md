@@ -1,4 +1,4 @@
-# Coach
+# Coach Claude
 
 Personal training, nutrition, and coaching hub with cloud sync via Supabase.
 
@@ -9,7 +9,7 @@ Tabs:
 - **Alcohol** — quick-tap drink logger with UK alcohol units
 - **Settings** — calorie target, target weights per exercise
 
-Originally named "Training Log" — renamed to "Coach" when expanded into a multi-tab fitness hub with an AI coaching loop.
+Originally named "Training Log" — renamed to "Coach Claude" when expanded into a multi-tab fitness hub with an AI coaching loop.
 
 ## Deploy
 

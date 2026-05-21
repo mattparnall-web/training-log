@@ -1,6 +1,6 @@
 {
-  "name": "Coach",
-  "short_name": "Coach",
+  "name": "Coach Claude",
+  "short_name": "Coach Claude",
   "description": "Personal training, nutrition, and coaching hub",
   "start_url": "/",
   "display": "standalone",
