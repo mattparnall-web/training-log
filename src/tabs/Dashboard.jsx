@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  sb, T, display,
+  sb, T, display, inputStyle,
   todayString, shiftDate, startOfDayLocal, endOfDayLocal,
   prettyDate, dateStrOf,
   DateBar,
 } from "./_shared.jsx";
+
+// localStorage key for per-date coach notes — survives reloads on this device.
+const NOTES_KEY = (dateStr) => `coach-claude:notes:${dateStr}`;
 
 // ---- Weekly programme ----
 const DAYS = [
@@ -95,10 +98,17 @@ function pickReadiness(section) {
   if (!d) return null;
   const r = Array.isArray(d) ? d[0] : d;
   if (!r) return null;
+  // Drop the feedback if it's a raw Garmin composite key like MOD_RT_LOW_SS_MOD
+  // (their app translates these to sentences client-side; we don't have the table).
+  const rawFeedback = r.feedbackLong || r.feedbackShort || null;
+  const friendlyFeedback =
+    typeof rawFeedback === "string" && /^[A-Z0-9_]+$/.test(rawFeedback)
+      ? null
+      : rawFeedback;
   return {
     score: r.score ?? null,
     level: r.level ?? null,
-    feedback: r.feedbackLong || r.feedbackShort || null,
+    feedback: friendlyFeedback,
     sleep_score: r.sleepScore ?? null,
     hrv_factor: r.hrvFactorPercent ?? null,
     recovery_time: r.recoveryTime ?? null,
@@ -193,7 +203,7 @@ function summariseSession(s) {
 }
 
 // ---- Coach prompt ----
-function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, yIntake }) {
+function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, yIntake, athleteNotes }) {
   const sleep = pickSleep(garmin?.sleep);
   const bb = pickBodyBattery(garmin?.body_battery);
   const hrv = pickHRV(garmin?.hrv);
@@ -232,7 +242,10 @@ YESTERDAY'S INTAKE:
   - Alcohol: ${yIntake?.drinks ?? 0} drinks, ${yIntake?.units ?? 0} units
 
 RECENT SESSIONS (most recent first, up to 10):
-  ${recentText}`;
+  ${recentText}
+
+ATHLETE NOTES (free-text observations from the athlete — take these into account):
+${athleteNotes?.trim() ? athleteNotes.trim() : "  (none today)"}`;
 }
 
 const COACH_SYSTEM_PROMPT = `You are an experienced strength & conditioning coach. The athlete is on a body-recomp protocol with a fixed weekly split:
@@ -312,6 +325,21 @@ export default function Dashboard() {
   const [planLoading, setPlanLoading] = useState(true);
   const [coachBusy, setCoachBusy] = useState(false);
   const [coachError, setCoachError] = useState(null);
+
+  // Free-text notes the user can jot before tapping "Plan today's session".
+  // Persisted per-date in localStorage so they survive reloads on this device.
+  const [notes, setNotes] = useState("");
+  useEffect(() => {
+    try {
+      setNotes(localStorage.getItem(NOTES_KEY(selectedDate)) || "");
+    } catch {
+      setNotes("");
+    }
+  }, [selectedDate]);
+  const updateNotes = (v) => {
+    setNotes(v);
+    try { localStorage.setItem(NOTES_KEY(selectedDate), v); } catch {}
+  };
 
   const isToday = selectedDate === todayString();
   const day = dayDefFor(selectedDate);
@@ -431,6 +459,7 @@ export default function Dashboard() {
         garmin,
         recentSessions,
         yIntake,
+        athleteNotes: notes,
       });
       const replyText = await callClaudeText(COACH_SYSTEM_PROMPT, userPrompt, 1400);
       const parsed = parseCoachReply(replyText);
@@ -587,25 +616,51 @@ export default function Dashboard() {
           ) : plan ? (
             <CoachPlanView plan={plan} onRegenerate={planSession} onClear={clearPlan} busy={coachBusy} />
           ) : (
-            <button
-              onClick={planSession}
-              disabled={coachBusy || garminLoading}
-              style={{
-                width: "100%",
-                padding: "14px",
-                background: coachBusy ? T.surface2 : T.accent,
-                color: coachBusy ? T.textMuted : "#fff",
-                border: "none",
-                borderRadius: "10px",
-                fontSize: "13px",
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                cursor: coachBusy ? "wait" : "pointer",
-                boxShadow: coachBusy ? "none" : "0 4px 12px rgba(234,88,12,0.25)",
-              }}
-            >
-              {coachBusy ? "COACH IS THINKING…" : "🧠 PLAN TODAY'S SESSION"}
-            </button>
+            <>
+              <div
+                style={{
+                  fontSize: "10px",
+                  letterSpacing: "0.15em",
+                  color: T.textMuted,
+                  fontWeight: 700,
+                  marginBottom: "6px",
+                }}
+              >
+                NOTES FOR THE COACH (optional)
+              </div>
+              <textarea
+                value={notes}
+                onChange={(e) => updateNotes(e.target.value)}
+                placeholder="e.g. knee feels stiff, hit RPE 9 on bench Mon, sleep was broken…"
+                rows={3}
+                style={{
+                  ...inputStyle,
+                  width: "100%",
+                  fontSize: "13px",
+                  resize: "vertical",
+                  marginBottom: "10px",
+                }}
+              />
+              <button
+                onClick={planSession}
+                disabled={coachBusy || garminLoading}
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  background: coachBusy ? T.surface2 : T.accent,
+                  color: coachBusy ? T.textMuted : "#fff",
+                  border: "none",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  cursor: coachBusy ? "wait" : "pointer",
+                  boxShadow: coachBusy ? "none" : "0 4px 12px rgba(234,88,12,0.25)",
+                }}
+              >
+                {coachBusy ? "COACH IS THINKING…" : "🧠 PLAN TODAY'S SESSION"}
+              </button>
+            </>
           )}
         </div>
       </Card>
@@ -649,7 +704,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            <Metric label="SLEEP" big={hoursMinutes(sleep?.duration_seconds)} sub={sleep?.score != null ? `Score: ${sleep.score}` : null} />
+            <Metric label="PRIOR NIGHT'S SLEEP" big={hoursMinutes(sleep?.duration_seconds)} sub={sleep?.score != null ? `Score: ${sleep.score}` : null} />
             <Metric label="BODY BATTERY" big={valueOrDash(bb?.current ?? bb?.max)} sub={bb?.max != null && bb?.min != null ? `${bb.min}–${bb.max}` : null} />
             <Metric label="HRV (LAST NIGHT)" big={valueOrDash(hrv?.last_night_avg, "ms")} sub={hrv?.status ? hrv.status : (hrv?.weekly_avg != null ? `7d avg ${hrv.weekly_avg}` : null)} />
             <Metric label="TRAINING STATUS" big={trainingStatus?.status || "—"} sub={trainingStatus?.feedback || null} />

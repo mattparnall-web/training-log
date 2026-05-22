@@ -3,15 +3,17 @@ import WorkoutTracker from "./WorkoutTracker.jsx";
 import Dashboard from "./tabs/Dashboard.jsx";
 import Food from "./tabs/Food.jsx";
 import Alcohol from "./tabs/Alcohol.jsx";
+import Supps from "./tabs/Supps.jsx";
 import Settings from "./tabs/Settings.jsx";
 
 // Tab definitions — order = display order in the bottom bar.
 const TABS = [
-  { id: "dashboard", label: "Today", icon: DashIcon, Component: Dashboard },
-  { id: "workout",   label: "Workout", icon: DumbellIcon, Component: WorkoutTracker },
-  { id: "food",      label: "Food", icon: ForkIcon, Component: Food },
-  { id: "alcohol",   label: "Alcohol", icon: GlassIcon, Component: Alcohol },
-  { id: "settings",  label: "Settings", icon: GearIcon, Component: Settings },
+  { id: "dashboard", label: "Today",    icon: DashIcon,    Component: Dashboard },
+  { id: "workout",   label: "Workout",  icon: DumbellIcon, Component: WorkoutTracker },
+  { id: "food",      label: "Food",     icon: ForkIcon,    Component: Food },
+  { id: "supps",     label: "Supps",    icon: PillIcon,    Component: Supps },
+  { id: "alcohol",   label: "Alcohol",  icon: GlassIcon,   Component: Alcohol },
+  { id: "settings",  label: "Settings", icon: GearIcon,    Component: Settings },
 ];
 
 const T = {
@@ -129,6 +131,14 @@ function ForkIcon({ active }) {
       <path d="M10 2v6a3 3 0 0 1-3 3" />
       <line x1="7" y1="11" x2="7" y2="22" />
       <path d="M17 2c-2 0-3 2-3 5s1 5 3 5v10" />
+    </svg>
+  );
+}
+function PillIcon({ active }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.4 : 2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.5 20.5 20.5 10.5a4.95 4.95 0 1 0-7-7L3.5 13.5a4.95 4.95 0 1 0 7 7z" />
+      <line x1="8.5" y1="8.5" x2="15.5" y2="15.5" />
     </svg>
   );
 }

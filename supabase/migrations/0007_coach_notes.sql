@@ -1,0 +1,6 @@
+-- Intentionally empty.
+-- Originally planned to add a coach_notes column on `settings`, but the design
+-- moved to per-date notes stored in the browser (localStorage) next to the
+-- Plan Today's Session button — no server table needed.
+--
+-- Safe to ignore / not run.
