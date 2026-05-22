@@ -228,6 +228,10 @@ function pickTrainingStatus(section) {
     feedback: friendlyFeedback,
     source_date: dateOf(chosen) || null,
     diagnostics,
+    // Full raw response so we can see every field, in case the "real" status
+    // lives outside latestTrainingStatusData (e.g. in mostRecentTrainingLoadBalance).
+    rawTopLevelKeys: Object.keys(d || {}),
+    rawSnapshot: d,
   };
 }
 function pickDailySummary(section) {
@@ -888,7 +892,11 @@ export default function Dashboard() {
                 sub={trainingStatus?.feedback || null}
               />
               {trainingStatus?.diagnostics?.length >= 1 && (
-                <TrainingStatusDiagnostic devices={trainingStatus.diagnostics} />
+                <TrainingStatusDiagnostic
+                  devices={trainingStatus.diagnostics}
+                  rawTopLevelKeys={trainingStatus.rawTopLevelKeys}
+                  rawSnapshot={trainingStatus.rawSnapshot}
+                />
               )}
             </div>
           </>
@@ -978,8 +986,9 @@ function Metric({ label, big, sub, tone }) {
   );
 }
 
-function TrainingStatusDiagnostic({ devices }) {
+function TrainingStatusDiagnostic({ devices, rawTopLevelKeys, rawSnapshot }) {
   const [open, setOpen] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
   return (
     <div style={{ marginTop: "8px" }}>
       <button
@@ -995,7 +1004,7 @@ function TrainingStatusDiagnostic({ devices }) {
           padding: 0,
         }}
       >
-        {open ? "▼ HIDE PER-DEVICE BREAKDOWN" : `▸ ${devices.length} DEVICES — SHOW BREAKDOWN`}
+        {open ? "▼ HIDE PER-DEVICE BREAKDOWN" : `▸ ${devices.length} DEVICE${devices.length === 1 ? "" : "S"} — SHOW BREAKDOWN`}
       </button>
       {open && (
         <div
@@ -1032,6 +1041,55 @@ function TrainingStatusDiagnostic({ devices }) {
           ))}
           <div style={{ marginTop: "8px", fontSize: "10px", color: T.textMuted }}>
             ✓ = the one shown above. If the wrong device is winning, screenshot this panel and paste it back to me — I'll pin your watch's deviceId so it's always preferred.
+          </div>
+
+          {/* Raw response — second toggle for the full Garmin payload. */}
+          <div style={{ marginTop: "10px", paddingTop: "10px", borderTop: `1px solid ${T.border}` }}>
+            <button
+              onClick={() => setRawOpen((v) => !v)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: T.textMuted,
+                fontSize: "10px",
+                letterSpacing: "0.1em",
+                fontWeight: 700,
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              {rawOpen ? "▼ HIDE RAW JSON" : "▸ SHOW RAW JSON (debug)"}
+            </button>
+            {rawOpen && (
+              <>
+                <div style={{ fontSize: "10px", color: T.textMuted, marginTop: "6px" }}>
+                  top-level keys: {(rawTopLevelKeys || []).join(", ") || "(none)"}
+                </div>
+                <pre
+                  style={{
+                    marginTop: "6px",
+                    background: "#0f172a",
+                    color: "#e2e8f0",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    fontSize: "10px",
+                    lineHeight: 1.4,
+                    overflow: "auto",
+                    maxHeight: "320px",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {(() => {
+                    try {
+                      return JSON.stringify(rawSnapshot, null, 2);
+                    } catch (e) {
+                      return `(failed to serialize: ${e?.message})`;
+                    }
+                  })()}
+                </pre>
+              </>
+            )}
           </div>
         </div>
       )}
