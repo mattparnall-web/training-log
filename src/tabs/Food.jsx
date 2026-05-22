@@ -4,6 +4,7 @@ import {
   todayString, startOfDayLocal, endOfDayLocal,
   noonOf, prettyDate, timeOf, dateStrOf,
   SubTabs, DateBar, HistoryView, CalendarMonthView,
+  dayDefFor, nutritionTargetsFor,
 } from "./_shared.jsx";
 
 // ---- Anthropic proxy (same one the whiteboard scanner uses) ----
@@ -126,8 +127,7 @@ export default function Food() {
   const [selectedDate, setSelectedDate] = useState(todayString());
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [calTarget, setCalTarget] = useState(null);
-  const [proteinTarget, setProteinTarget] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [error, setError] = useState(null);
 
   const [draft, setDraft] = useState(null);
@@ -157,11 +157,8 @@ export default function Food() {
   useEffect(() => {
     (async () => {
       try {
-        const settings = await sb(
-          "/settings?select=daily_calorie_target,daily_protein_target_g&id=eq.1"
-        );
-        setCalTarget(settings?.[0]?.daily_calorie_target ?? null);
-        setProteinTarget(settings?.[0]?.daily_protein_target_g ?? null);
+        const rows = await sb("/settings?select=*&id=eq.1");
+        setSettings(rows?.[0] || null);
       } catch {}
       load();
     })();
@@ -175,11 +172,27 @@ export default function Food() {
     return t >= dayStartMs && t <= dayEndMs;
   });
 
+  // Day-aware targets — pull the right bucket for the selected date's day type.
+  const day = dayDefFor(selectedDate);
+  const targets = nutritionTargetsFor(settings, day.type);
+
   const sum = (k) => dayEntries.reduce((a, e) => a + Number(e[k] || 0), 0);
   const dayCals = Math.round(sum("calories"));
   const dayProtein = Math.round(sum("protein_g"));
-  const calPct = calTarget ? Math.min(100, Math.round((dayCals / calTarget) * 100)) : null;
-  const proteinPct = proteinTarget ? Math.min(100, Math.round((dayProtein / proteinTarget) * 100)) : null;
+  const dayFat = Math.round(sum("fat_g"));
+  const dayCarbs = Math.round(sum("carbs_g"));
+
+  const pct = (cur, t) => (t ? Math.min(100, Math.round((cur / t) * 100)) : null);
+  const calPct = pct(dayCals, targets.calories);
+  const proteinPct = pct(dayProtein, targets.protein_g);
+  const fatPct = pct(dayFat, targets.fat_g);
+  const carbsPct = pct(dayCarbs, targets.carbs_g);
+
+  // Tone for cal: green just under, amber slightly over, red way over
+  const calTone = targets.calories == null ? null : calPct < 90 ? T.ok : calPct < 105 ? T.amber : T.warn;
+  const proteinTone = targets.protein_g == null ? null : proteinPct < 80 ? T.amber : T.ok;
+  const fatTone = targets.fat_g == null ? null : fatPct < 80 ? T.amber : fatPct < 120 ? T.ok : T.warn;
+  const carbsTone = targets.carbs_g == null ? null : carbsPct < 80 ? T.amber : carbsPct < 110 ? T.ok : T.warn;
 
   // ---- Actions ----
   const onPhotoSelected = async (file) => {
@@ -270,6 +283,32 @@ export default function Food() {
     }
   };
 
+  // Duplicate an entry — useful for "one more of those biscuits".
+  // Stamps the new entry at "now" if viewing today, otherwise noon of the selected date.
+  const duplicateEntry = async (e) => {
+    try {
+      const consumed = isToday ? new Date() : noonOf(selectedDate);
+      const row = {
+        consumed_at: consumed.toISOString(),
+        source: e.source || "manual",
+        name: e.name,
+        calories: e.calories,
+        protein_g: e.protein_g,
+        carbs_g: e.carbs_g,
+        fat_g: e.fat_g,
+        ai_confidence: e.ai_confidence,
+        ai_notes: e.ai_notes,
+      };
+      const created = await sb("/food_entries", {
+        method: "POST",
+        body: JSON.stringify(row),
+      });
+      setEntries((prev) => [created[0], ...prev]);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   // ---- Entry row renderer (shared by LOG / HISTORY / CALENDAR) ----
   const renderEntryRow = (e) => (
     <div
@@ -306,20 +345,39 @@ export default function Food() {
           {e.ai_confidence ? ` · ${e.ai_confidence}` : ""}
         </div>
       </div>
-      <button
-        onClick={() => deleteEntry(e.id)}
-        style={{
-          background: "transparent",
-          border: `1px solid ${T.border2}`,
-          color: T.textMuted,
-          borderRadius: "6px",
-          padding: "4px 8px",
-          fontSize: "12px",
-          cursor: "pointer",
-        }}
-      >
-        ×
-      </button>
+      <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+        <button
+          onClick={() => duplicateEntry(e)}
+          title="Log another of these"
+          style={{
+            background: "transparent",
+            border: `1px solid ${T.border2}`,
+            color: T.accent,
+            borderRadius: "6px",
+            padding: "4px 8px",
+            fontSize: "11px",
+            fontWeight: 700,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          +1
+        </button>
+        <button
+          onClick={() => deleteEntry(e.id)}
+          style={{
+            background: "transparent",
+            border: `1px solid ${T.border2}`,
+            color: T.textMuted,
+            borderRadius: "6px",
+            padding: "4px 8px",
+            fontSize: "12px",
+            cursor: "pointer",
+          }}
+        >
+          ×
+        </button>
+      </div>
     </div>
   );
 
@@ -368,6 +426,18 @@ export default function Food() {
         <>
           <DateBar value={selectedDate} onChange={setSelectedDate} />
 
+          {/* Bucket badge — shows which day-type bucket the targets came from */}
+          <div
+            style={{
+              fontSize: "10px",
+              letterSpacing: "0.15em",
+              color: T.textMuted,
+              fontWeight: 700,
+              marginBottom: "8px",
+            }}
+          >
+            TARGETS · {targets.bucket?.toUpperCase() || "—"} ({day.name})
+          </div>
           <div
             style={{
               display: "grid",
@@ -379,16 +449,30 @@ export default function Food() {
             <StatCard
               label="CALORIES"
               value={dayCals}
-              sub={calTarget ? `of ${calTarget}` : "no target set"}
+              sub={targets.calories ? `of ${targets.calories}` : "no target"}
               progress={calPct}
-              color={calPct == null ? T.textMuted : calPct < 90 ? T.ok : calPct < 105 ? T.amber : T.warn}
+              color={calTone || T.textMuted}
             />
             <StatCard
               label="PROTEIN (G)"
               value={dayProtein}
-              sub={proteinTarget ? `of ${proteinTarget}` : "no target set"}
+              sub={targets.protein_g ? `of ${targets.protein_g}` : "no target"}
               progress={proteinPct}
-              color={proteinPct == null ? T.textMuted : proteinPct < 80 ? T.amber : T.ok}
+              color={proteinTone || T.textMuted}
+            />
+            <StatCard
+              label="FAT (G)"
+              value={dayFat}
+              sub={targets.fat_g ? `of ${targets.fat_g}` : "no target"}
+              progress={fatPct}
+              color={fatTone || T.textMuted}
+            />
+            <StatCard
+              label="CARBS (G)"
+              value={dayCarbs}
+              sub={targets.carbs_g ? `of ${targets.carbs_g}` : "no target"}
+              progress={carbsPct}
+              color={carbsTone || T.textMuted}
             />
           </div>
 

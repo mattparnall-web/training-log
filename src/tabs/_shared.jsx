@@ -130,6 +130,69 @@ export function timeOf(iso) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// ---------- Weekly programme + day-type → nutrition bucket ----------
+// Mirror of WorkoutTracker's DAYS so tabs that need to know "what day is this"
+// can do so without importing the workout file.
+export const DAYS = [
+  { id: "monday",    label: "MON", name: "Upper Push",          type: "upper_push",  color: "#7c3aed" },
+  { id: "tuesday",   label: "TUE", name: "Upper Pull + Deads",  type: "upper_pull",  color: "#0891b2" },
+  { id: "wednesday", label: "WED", name: "Active Recovery",     type: "recovery",    color: "#16a34a" },
+  { id: "thursday",  label: "THU", name: "Lower — Squat",       type: "lower_squat", color: "#2563eb" },
+  { id: "friday",    label: "FRI", name: "Flexible",            type: "flexible",    color: "#94a3b8" },
+  { id: "saturday",  label: "SAT", name: "Olympic + MetCon",    type: "olympic",     color: "#dc2626" },
+  { id: "sunday",    label: "SUN", name: "Zone 2 Cardio",       type: "cardio",      color: "#16a34a" },
+];
+
+export function dayDefFor(dateStr) {
+  const dt = startOfDayLocal(dateStr);
+  const idx = (dt.getDay() + 6) % 7; // Monday = 0
+  return DAYS[idx];
+}
+
+// Map each day type to its nutrition target bucket.
+const DAY_TYPE_TO_NUTRITION_BUCKET = {
+  recovery:   "rest",
+  flexible:   "rest",      // default — Friday is open; lean rest unless overridden
+  upper_push: "lifting",
+  upper_pull: "lifting",
+  lower_squat:"lifting",
+  olympic:    "big",
+  cardio:     "big",
+};
+
+export const NUTRITION_BUCKETS = ["rest", "lifting", "big"];
+
+export const NUTRITION_BUCKET_LABELS = {
+  rest:    "REST DAY",
+  lifting: "LIFTING DAY",
+  big:     "BIG TRAINING / RIDE",
+};
+
+export function nutritionBucketFor(dayType) {
+  return DAY_TYPE_TO_NUTRITION_BUCKET[dayType] || "lifting";
+}
+
+// Resolve the macro targets for a given date, falling back gracefully.
+// Returns { calories, protein_g, fat_g, carbs_g, bucket }.
+export function nutritionTargetsFor(settings, dayType) {
+  const targets = settings?.nutrition_targets || {};
+  const bucket = nutritionBucketFor(dayType);
+  const b = targets[bucket] || {};
+  return {
+    calories: numericOrNull(b.calories) ?? numericOrNull(settings?.daily_calorie_target),
+    protein_g: numericOrNull(b.protein_g) ?? numericOrNull(settings?.daily_protein_target_g),
+    fat_g: numericOrNull(b.fat_g),
+    carbs_g: numericOrNull(b.carbs_g),
+    bucket,
+  };
+}
+
+function numericOrNull(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 // ---------- Sub-tab nav (LOG / HISTORY / CALENDAR) ----------
 export function SubTabs({ view, onChange, tabs }) {
   return (

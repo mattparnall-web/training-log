@@ -76,6 +76,13 @@ export default function Settings() {
   const [alcoholTarget, setAlcoholTarget] = useState("");
   const [keyLifts, setKeyLifts] = useState([]);
 
+  // Per-day-type macro targets: { rest: {...}, lifting: {...}, big: {...} }
+  const [nutritionTargets, setNutritionTargets] = useState({
+    rest:    { calories: "", protein_g: "", fat_g: "", carbs_g: "" },
+    lifting: { calories: "", protein_g: "", fat_g: "", carbs_g: "" },
+    big:     { calories: "", protein_g: "", fat_g: "", carbs_g: "" },
+  });
+
   // ---- Load on mount ----
   useEffect(() => {
     (async () => {
@@ -87,6 +94,12 @@ export default function Settings() {
           setProteinTarget(row.daily_protein_target_g ?? "");
           setAlcoholTarget(row.weekly_alcohol_units_target ?? "");
           setKeyLifts(Array.isArray(row.key_lifts) ? row.key_lifts : []);
+          const nt = row.nutrition_targets || {};
+          setNutritionTargets({
+            rest:    { calories: nt.rest?.calories    ?? "", protein_g: nt.rest?.protein_g    ?? "", fat_g: nt.rest?.fat_g    ?? "", carbs_g: nt.rest?.carbs_g    ?? "" },
+            lifting: { calories: nt.lifting?.calories ?? "", protein_g: nt.lifting?.protein_g ?? "", fat_g: nt.lifting?.fat_g ?? "", carbs_g: nt.lifting?.carbs_g ?? "" },
+            big:     { calories: nt.big?.calories     ?? "", protein_g: nt.big?.protein_g     ?? "", fat_g: nt.big?.fat_g     ?? "", carbs_g: nt.big?.carbs_g     ?? "" },
+          });
         }
       } catch (e) {
         setError(e.message);
@@ -95,6 +108,14 @@ export default function Settings() {
       }
     })();
   }, []);
+
+  const updateMacroTarget = (bucket, macro, value) => {
+    setNutritionTargets((prev) => ({
+      ...prev,
+      [bucket]: { ...prev[bucket], [macro]: value },
+    }));
+    markDirty();
+  };
 
   const markDirty = () => setDirty(true);
 
@@ -130,6 +151,11 @@ export default function Settings() {
             name: l.name.trim(),
             target_kg: numOrNull(l.target_kg),
           })),
+        nutrition_targets: {
+          rest:    { calories: numOrNull(nutritionTargets.rest.calories),    protein_g: numOrNull(nutritionTargets.rest.protein_g),    fat_g: numOrNull(nutritionTargets.rest.fat_g),    carbs_g: numOrNull(nutritionTargets.rest.carbs_g) },
+          lifting: { calories: numOrNull(nutritionTargets.lifting.calories), protein_g: numOrNull(nutritionTargets.lifting.protein_g), fat_g: numOrNull(nutritionTargets.lifting.fat_g), carbs_g: numOrNull(nutritionTargets.lifting.carbs_g) },
+          big:     { calories: numOrNull(nutritionTargets.big.calories),     protein_g: numOrNull(nutritionTargets.big.protein_g),     fat_g: numOrNull(nutritionTargets.big.fat_g),     carbs_g: numOrNull(nutritionTargets.big.carbs_g) },
+        },
       };
       await sb("/settings?id=eq.1", {
         method: "PATCH",
@@ -188,27 +214,81 @@ export default function Settings() {
         </div>
       )}
 
-      {/* ---- Daily / weekly targets ---- */}
+      {/* ---- Nutrition targets (per day-type bucket) ---- */}
       <div style={sectionStyle}>
-        <div style={sectionHeader}>DAILY TARGETS</div>
-
-        <div style={{ marginBottom: "14px" }}>
-          <div style={labelStyle}>Calories per day</div>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={calTarget}
-            onChange={(e) => { setCalTarget(e.target.value); markDirty(); }}
-            placeholder="e.g. 2400"
-            style={inputStyle}
-          />
+        <div style={sectionHeader}>NUTRITION TARGETS</div>
+        <div style={{ ...labelStyle, marginBottom: "14px" }}>
+          Targets vary by training day. Protein floor is constant across all days.
         </div>
 
-        <div style={{ marginBottom: "0" }}>
-          <div style={labelStyle}>Protein per day (grams)</div>
+        {[
+          { key: "rest",    label: "REST DAY",            sub: "Wed (recovery), Fri (flexible)", color: "#16a34a" },
+          { key: "lifting", label: "LIFTING DAY",         sub: "Mon · Tue · Thu",                color: "#7c3aed" },
+          { key: "big",     label: "BIG TRAINING / RIDE", sub: "Sat (Olympic) · Sun (cardio)",   color: "#dc2626" },
+        ].map((bucket) => (
+          <div
+            key={bucket.key}
+            style={{
+              background: T.surface2,
+              border: `1px solid ${T.border}`,
+              borderLeft: `4px solid ${bucket.color}`,
+              borderRadius: "10px",
+              padding: "12px",
+              marginBottom: "10px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "11px",
+                fontWeight: 800,
+                letterSpacing: "0.1em",
+                color: T.text,
+                marginBottom: "2px",
+              }}
+            >
+              {bucket.label}
+            </div>
+            <div style={{ fontSize: "10px", color: T.textMuted, marginBottom: "10px" }}>
+              {bucket.sub}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <MacroInput
+                label="Calories"
+                value={nutritionTargets[bucket.key].calories}
+                onChange={(v) => updateMacroTarget(bucket.key, "calories", v)}
+              />
+              <MacroInput
+                label="Protein (g)"
+                value={nutritionTargets[bucket.key].protein_g}
+                onChange={(v) => updateMacroTarget(bucket.key, "protein_g", v)}
+              />
+              <MacroInput
+                label="Fat (g)"
+                value={nutritionTargets[bucket.key].fat_g}
+                onChange={(v) => updateMacroTarget(bucket.key, "fat_g", v)}
+              />
+              <MacroInput
+                label="Carbs (g)"
+                value={nutritionTargets[bucket.key].carbs_g}
+                onChange={(v) => updateMacroTarget(bucket.key, "carbs_g", v)}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ---- Legacy single targets (kept hidden — superseded by nutrition_targets above) ---- */}
+      <div style={{ display: "none" }}>
+        <div>
           <input
             type="number"
-            inputMode="numeric"
+            value={calTarget}
+            onChange={(e) => { setCalTarget(e.target.value); markDirty(); }}
+          />
+        </div>
+        <div>
+          <input
+            type="number"
             value={proteinTarget}
             onChange={(e) => { setProteinTarget(e.target.value); markDirty(); }}
             placeholder="e.g. 180"
@@ -347,6 +427,31 @@ export default function Settings() {
           {saving ? "SAVING…" : dirty ? "SAVE CHANGES" : "ALL SAVED"}
         </button>
       </div>
+    </div>
+  );
+}
+
+function MacroInput({ label, value, onChange }) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: "10px",
+          letterSpacing: "0.1em",
+          color: T.textMuted,
+          fontWeight: 700,
+          marginBottom: "4px",
+        }}
+      >
+        {label}
+      </div>
+      <input
+        type="number"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...inputStyle, fontSize: "15px", padding: "8px 10px", width: "100%" }}
+      />
     </div>
   );
 }

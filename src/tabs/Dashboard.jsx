@@ -4,26 +4,11 @@ import {
   todayString, shiftDate, startOfDayLocal, endOfDayLocal,
   prettyDate, dateStrOf,
   DateBar,
+  DAYS, dayDefFor, nutritionTargetsFor,
 } from "./_shared.jsx";
 
 // localStorage key for per-date coach notes — survives reloads on this device.
 const NOTES_KEY = (dateStr) => `coach-claude:notes:${dateStr}`;
-
-// ---- Weekly programme ----
-const DAYS = [
-  { id: "monday",    label: "MON", name: "Upper Push",          type: "upper_push",  color: "#7c3aed" },
-  { id: "tuesday",   label: "TUE", name: "Upper Pull + Deads",  type: "upper_pull",  color: "#0891b2" },
-  { id: "wednesday", label: "WED", name: "Active Recovery",     type: "recovery",    color: "#16a34a" },
-  { id: "thursday",  label: "THU", name: "Lower — Squat",       type: "lower_squat", color: "#2563eb" },
-  { id: "friday",    label: "FRI", name: "Flexible",            type: "flexible",    color: "#94a3b8" },
-  { id: "saturday",  label: "SAT", name: "Olympic + MetCon",    type: "olympic",     color: "#dc2626" },
-  { id: "sunday",    label: "SUN", name: "Zone 2 Cardio",       type: "cardio",      color: "#16a34a" },
-];
-function dayDefFor(dateStr) {
-  const dt = startOfDayLocal(dateStr);
-  const idx = (dt.getDay() + 6) % 7;
-  return DAYS[idx];
-}
 
 // ---- Anthropic proxy ----
 const PROXY_URL = "/api/proxy";
@@ -294,7 +279,7 @@ function summariseSession(s) {
 }
 
 // ---- Coach prompt ----
-function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, yIntake, athleteNotes }) {
+function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, yIntake, todayTargets, yesterdayTargets, athleteNotes }) {
   const sleep = pickSleep(garmin?.sleep);
   const bb = pickBodyBattery(garmin?.body_battery);
   const hrv = pickHRV(garmin?.hrv);
@@ -315,10 +300,12 @@ DAY OF WEEK: ${day.label} — programme says: ${day.name}
 KEY LIFT TARGETS (athlete's current 1-rep targets or working weights):
 ${keyLiftsText}
 
-NUTRITION TARGETS:
-  - Daily calories: ${settings?.daily_calorie_target ?? "not set"}
-  - Daily protein: ${settings?.daily_protein_target_g ?? "not set"} g
-  - Weekly alcohol units: ${settings?.weekly_alcohol_units_target ?? "not set"}
+TODAY'S NUTRITION TARGETS (day-type: ${todayTargets?.bucket ?? "?"} — calibrated to training intensity):
+  - Calories: ${todayTargets?.calories ?? "not set"}
+  - Protein: ${todayTargets?.protein_g ?? "not set"} g
+  - Fat: ${todayTargets?.fat_g ?? "not set"} g
+  - Carbs: ${todayTargets?.carbs_g ?? "not set"} g
+  - Weekly alcohol units cap: ${settings?.weekly_alcohol_units_target ?? "not set"}
 
 LAST NIGHT / TODAY'S RECOVERY (from Garmin):
   - Sleep: ${hoursMinutes(sleep?.duration_seconds)} (score: ${sleep?.score ?? "n/a"}); deep ${hoursMinutes(sleep?.deep_seconds)}, REM ${hoursMinutes(sleep?.rem_seconds)}
@@ -328,9 +315,11 @@ LAST NIGHT / TODAY'S RECOVERY (from Garmin):
   - Training status: ${status?.status ?? "n/a"}
   - Training load balance: ${status?.loadBalanceFeedback ?? "n/a"}${status?.loadBalanceRaw ? ` (Garmin code: ${status.loadBalanceRaw})` : ""}
 
-YESTERDAY'S INTAKE:
-  - Calories: ${yIntake?.calories ?? 0} kcal
-  - Protein: ${yIntake?.protein_g ?? 0} g
+YESTERDAY'S INTAKE (vs yesterday's day-type targets — bucket: ${yesterdayTargets?.bucket ?? "?"}):
+  - Calories: ${yIntake?.calories ?? 0} kcal (target ${yesterdayTargets?.calories ?? "?"})
+  - Protein: ${yIntake?.protein_g ?? 0} g (target ${yesterdayTargets?.protein_g ?? "?"})
+  - Fat: ${yIntake?.fat_g ?? 0} g (target ${yesterdayTargets?.fat_g ?? "?"})
+  - Carbs: ${yIntake?.carbs_g ?? 0} g (target ${yesterdayTargets?.carbs_g ?? "?"})
   - Alcohol: ${yIntake?.drinks ?? 0} drinks, ${yIntake?.units ?? 0} units
 
 RECENT SESSIONS (most recent first, up to 10):
@@ -590,8 +579,10 @@ export default function Dashboard() {
     try {
       const recentSessions = await fetchRecentSessions(10);
       const yIntake = {
-        calories: Math.round(foodYesterday.reduce((a, e) => a + Number(e.calories || 0), 0)),
-        protein_g: Math.round(foodYesterday.reduce((a, e) => a + Number(e.protein_g || 0), 0)),
+        calories: yCalories,
+        protein_g: yProtein,
+        fat_g: yFat,
+        carbs_g: yCarbs,
         drinks: alcoholYesterday.length,
         units: round1(alcoholYesterday.reduce((a, e) => a + Number(e.units || 0), 0)),
       };
@@ -602,6 +593,8 @@ export default function Dashboard() {
         garmin,
         recentSessions,
         yIntake,
+        todayTargets,
+        yesterdayTargets,
         athleteNotes: notes,
       });
       const replyText = await callClaudeText(COACH_SYSTEM_PROMPT, userPrompt, 1400);
@@ -660,11 +653,19 @@ export default function Dashboard() {
 
   const yCalories = Math.round(foodYesterday.reduce((a, e) => a + Number(e.calories || 0), 0));
   const yProtein = Math.round(foodYesterday.reduce((a, e) => a + Number(e.protein_g || 0), 0));
+  const yFat = Math.round(foodYesterday.reduce((a, e) => a + Number(e.fat_g || 0), 0));
+  const yCarbs = Math.round(foodYesterday.reduce((a, e) => a + Number(e.carbs_g || 0), 0));
   const yUnits = round1(alcoholYesterday.reduce((a, e) => a + Number(e.units || 0), 0));
   const yDrinks = alcoholYesterday.length;
 
-  const calTarget = settings?.daily_calorie_target;
-  const proteinTarget = settings?.daily_protein_target_g;
+  // Use day-aware targets — yesterday's targets are based on yesterday's day type;
+  // today's targets are based on today's day type (for the coach prompt).
+  const yesterdayDay = dayDefFor(yesterdayStr);
+  const yesterdayTargets = nutritionTargetsFor(settings, yesterdayDay.type);
+  const todayTargets = nutritionTargetsFor(settings, day.type);
+
+  const calTarget = yesterdayTargets.calories;
+  const proteinTarget = yesterdayTargets.protein_g;
   const keyLifts = Array.isArray(settings?.key_lifts) ? settings.key_lifts : [];
 
   return (
