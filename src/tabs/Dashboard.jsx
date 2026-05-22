@@ -144,23 +144,35 @@ function pickTrainingStatus(section) {
   if (!d) return null;
   const latest = d?.mostRecentTrainingStatus?.latestTrainingStatusData;
   if (!latest) return null;
-  const firstDevice = Object.values(latest)[0];
-  if (!firstDevice) return null;
+
+  const devices = Object.values(latest);
+  if (!devices.length) return null;
+
+  // If multiple Garmin devices are paired (watch + Edge etc), pick the entry
+  // with the most recent calendarDate / timestamp. The "first" device by object
+  // key order can lag behind the primary watch and report a stale status.
+  const dateOf = (dev) =>
+    dev?.calendarDate || dev?.statusDate || dev?.timestamp || "";
+  const mostRecent = devices.reduce(
+    (best, cur) => (dateOf(cur) > dateOf(best) ? cur : best),
+    devices[0]
+  );
 
   // The composite "trainingStatusFeedbackPhrase" (e.g. MOD_RT_LOW_SS_MOD) is
   // Garmin's internal key — their app translates it to a sentence client-side.
   // We don't have the translation table so we just hide it.
-  const rawFeedback = firstDevice?.trainingStatusFeedbackPhrase ?? null;
+  const rawFeedback = mostRecent?.trainingStatusFeedbackPhrase ?? null;
   const friendlyFeedback =
     typeof rawFeedback === "string" && /^[A-Z0-9_]+$/.test(rawFeedback)
       ? null
       : rawFeedback;
 
   return {
-    status: humanTrainingStatus(firstDevice?.trainingStatus),
+    status: humanTrainingStatus(mostRecent?.trainingStatus),
     load:
-      firstDevice?.acwrFlash?.value ?? firstDevice?.weeklyTrainingLoad ?? null,
+      mostRecent?.acwrFlash?.value ?? mostRecent?.weeklyTrainingLoad ?? null,
     feedback: friendlyFeedback,
+    source_date: dateOf(mostRecent) || null,
   };
 }
 function pickDailySummary(section) {
@@ -715,7 +727,7 @@ export default function Dashboard() {
         </div>
       </Card>
 
-      {/* Recovery card */}
+      {/* Recovery card — sleep gets pride of place with duration + score equal */}
       <Card>
         <CardLabel>RECOVERY</CardLabel>
         {garminLoading ? (
@@ -753,12 +765,72 @@ export default function Dashboard() {
             </button>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            <Metric label="PRIOR NIGHT'S SLEEP" big={hoursMinutes(sleep?.duration_seconds)} sub={sleep?.score != null ? `Score: ${sleep.score}` : null} />
-            <Metric label="BODY BATTERY" big={valueOrDash(bb?.current ?? bb?.max)} sub={bb?.max != null && bb?.min != null ? `${bb.min}–${bb.max}` : null} />
-            <Metric label="HRV (LAST NIGHT)" big={valueOrDash(hrv?.last_night_avg, "ms")} sub={hrv?.status ? hrv.status : (hrv?.weekly_avg != null ? `7d avg ${hrv.weekly_avg}` : null)} />
-            <Metric label="TRAINING STATUS" big={trainingStatus?.status || "—"} sub={trainingStatus?.feedback || null} />
-          </div>
+          <>
+            {/* Sleep — full-width row with duration + score side by side */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+                paddingBottom: "12px",
+                marginBottom: "12px",
+                borderBottom: `1px solid ${T.border}`,
+              }}
+            >
+              <Metric
+                label="PRIOR NIGHT'S SLEEP"
+                big={hoursMinutes(sleep?.duration_seconds)}
+                sub={
+                  sleep?.deep_seconds != null
+                    ? `Deep ${hoursMinutes(sleep.deep_seconds)} · REM ${hoursMinutes(sleep.rem_seconds)}`
+                    : null
+                }
+              />
+              <Metric
+                label="SLEEP SCORE"
+                big={valueOrDash(sleep?.score)}
+                tone={
+                  sleep?.score == null
+                    ? null
+                    : sleep.score >= 80
+                    ? "ok"
+                    : sleep.score >= 60
+                    ? "under"
+                    : "over"
+                }
+              />
+            </div>
+
+            {/* Body battery + HRV side by side */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+                marginBottom: "12px",
+              }}
+            >
+              <Metric
+                label="BODY BATTERY"
+                big={valueOrDash(bb?.current ?? bb?.max)}
+                sub={bb?.max != null && bb?.min != null ? `${bb.min}–${bb.max}` : null}
+              />
+              <Metric
+                label="HRV (LAST NIGHT)"
+                big={valueOrDash(hrv?.last_night_avg, "ms")}
+                sub={hrv?.status ? hrv.status : (hrv?.weekly_avg != null ? `7d avg ${hrv.weekly_avg}` : null)}
+              />
+            </div>
+
+            {/* Training status — full width with feedback below */}
+            <div style={{ paddingTop: "12px", borderTop: `1px solid ${T.border}` }}>
+              <Metric
+                label="TRAINING STATUS"
+                big={trainingStatus?.status || "—"}
+                sub={trainingStatus?.feedback || null}
+              />
+            </div>
+          </>
         )}
       </Card>
 
