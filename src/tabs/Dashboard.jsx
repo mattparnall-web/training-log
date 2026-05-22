@@ -254,37 +254,81 @@ const COACH_SYSTEM_PROMPT = `You are an experienced strength & conditioning coac
 - Fri: Flexible          - Sat: Olympic + MetCon
 - Sun: Zone 2 Cardio
 
-You will be given today's date, the athlete's recent training, last night's recovery data from Garmin, yesterday's nutrition + alcohol, and the athlete's current target weights for their key lifts.
+You will be given today's date, the athlete's recent training, last night's recovery data from Garmin, yesterday's nutrition + alcohol, the athlete's current target weights for their key lifts, and any free-text notes the athlete added.
 
 Your job: recommend TODAY'S SESSION, calibrated to recovery and recent load. Be specific and decisive.
 
 Hard rules:
 - Adapt intensity to readiness. Low HRV / poor sleep / low body battery / low readiness → scale back, focus on volume not load, or move some work to accessories. Strong recovery → push toward PRs.
 - Respect the planned day type unless recovery is genuinely poor (in which case suggest substituting a lighter session and say so).
-- Use the athlete's key lift targets as the reference for working weights; suggest specific percentages (e.g. "85% of target = 76kg").
-- Keep it realistic for a single ~60-minute session.
+- Use the athlete's key lift targets as the reference for working weights; suggest specific percentages (e.g. "85% of target = 76 kg").
+- Aim for 4–7 exercises in a single ~60-minute session.
+- Treat athlete free-text notes as high-signal input — adapt the session around them.
 - If yesterday's nutrition was well under calories or protein was way low, mention it briefly but don't lecture.
 
-Output format — produce exactly two sections, in this order:
+OUTPUT FORMAT — respond ONLY with a JSON object. No preamble, no markdown fences, no text outside the JSON. The JSON has exactly these keys:
 
-SUMMARY:
-<one or two sentences explaining your reasoning — what the recovery picture is and how today's session is calibrated to it.>
+{
+  "summary": "One or two sentences explaining your reasoning — the recovery picture and how today's session is calibrated to it.",
+  "exercises": [
+    {
+      "name": "Exercise name",
+      "prescription": "sets × reps @ weight, OR a duration, OR descriptive text",
+      "note": "optional brief inline note, or empty string"
+    }
+  ]
+}
 
-SESSION:
-1. <Exercise name> — <sets> × <reps> @ <weight> kg
-2. ...
-(Aim for 4–7 exercises. Add a brief inline note after exercises where useful, in parentheses.)
+Prescription examples:
+- "4 × 6 @ 82 kg"
+- "3 × 8 (bodyweight + 5 kg)"
+- "20–30 min @ Zone 2 (~60–70% max HR)"
+- "5 min foam roll"
+- "3 sets to RPE 8"
 
-No headers, no markdown, no extra preamble. Just SUMMARY: then SESSION:.`;
+Notes examples:
+- "deload from last week's PR — focus on bar speed"
+- "stop if knee twinges"
+- "" (when no note is needed)`;
 
-// ---- Parse Claude's response into summary + exercise list ----
+// ---- Parse Claude's response: JSON first, fall back to text headers ----
+function tryExtractJSON(text) {
+  try { return JSON.parse(text); } catch {}
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenceMatch) {
+    try { return JSON.parse(fenceMatch[1]); } catch {}
+  }
+  const braceMatch = text.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    try { return JSON.parse(braceMatch[0]); } catch {}
+  }
+  return null;
+}
+
 function parseCoachReply(text) {
-  const summaryMatch = text.match(/SUMMARY\s*:?\s*([\s\S]*?)(?:\n\s*SESSION\s*:?|$)/i);
-  const sessionMatch = text.match(/SESSION\s*:?\s*([\s\S]*)$/i);
-  return {
-    summary: summaryMatch ? summaryMatch[1].trim() : "",
-    session: sessionMatch ? sessionMatch[1].trim() : text,
-  };
+  // Preferred path: structured JSON.
+  const json = tryExtractJSON(text);
+  if (json && typeof json.summary === "string" && Array.isArray(json.exercises)) {
+    return {
+      summary: json.summary.trim(),
+      exercises: json.exercises.map((ex) => ({
+        name: String(ex.name ?? "").trim(),
+        prescription: String(ex.prescription ?? "").trim(),
+        note: String(ex.note ?? "").trim(),
+      })),
+      sessionText: null,
+    };
+  }
+  // Fallback for older / malformed responses: split on SESSION: header.
+  const sessionRegex = /(?:^|\n)\s*SESSION\s*:?\s*\n?/i;
+  const m = sessionRegex.exec(text);
+  if (m) {
+    const before = text.slice(0, m.index).trim();
+    const after = text.slice(m.index + m[0].length).trim();
+    const summary = before.replace(/^\s*SUMMARY\s*:?\s*/i, "").trim();
+    return { summary, exercises: null, sessionText: after };
+  }
+  return { summary: "", exercises: null, sessionText: text };
 }
 
 // ---- Read recent sessions from training-log's existing endpoint ----
@@ -419,9 +463,13 @@ export default function Dashboard() {
       const rows = await sb(`/planned_sessions?select=*&date=eq.${selectedDate}`);
       if (rows && rows.length > 0) {
         const r = rows[0];
+        // Re-parse the raw plan_text so old plans render correctly with the
+        // new parser (no migration needed).
+        const parsed = parseCoachReply(r.plan_text || "");
         setPlan({
-          summary: r.summary || "",
-          session: r.plan_text || "",
+          summary: parsed.summary || r.summary || "",
+          exercises: parsed.exercises,
+          sessionText: parsed.sessionText,
           model: r.model,
           created_at: r.created_at,
         });
@@ -464,13 +512,14 @@ export default function Dashboard() {
       const replyText = await callClaudeText(COACH_SYSTEM_PROMPT, userPrompt, 1400);
       const parsed = parseCoachReply(replyText);
 
-      // Persist to Supabase, one row per date (upsert).
+      // Persist the raw reply text so we can re-parse on load (lets us evolve
+      // the parser without re-running the AI call).
       const row = {
         date: selectedDate,
         day_id: day.id,
         day_name: day.name,
         summary: parsed.summary,
-        plan_text: parsed.session,
+        plan_text: replyText,
         model: COACH_MODEL,
       };
       await sb("/planned_sessions", {
@@ -481,7 +530,8 @@ export default function Dashboard() {
 
       setPlan({
         summary: parsed.summary,
-        session: parsed.session,
+        exercises: parsed.exercises,
+        sessionText: parsed.sessionText,
         model: COACH_MODEL,
         created_at: new Date().toISOString(),
       });
@@ -833,20 +883,102 @@ function CoachPlanView({ plan, onRegenerate, onClear, busy }) {
         </div>
       )}
 
-      <div
-        style={{
-          background: "rgba(255,255,255,0.05)",
-          borderRadius: "8px",
-          padding: "12px",
-          fontSize: "13px",
-          lineHeight: 1.65,
-          color: "#f1f5f9",
-          whiteSpace: "pre-wrap",
-          fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-        }}
-      >
-        {plan.session}
-      </div>
+      {/* Structured exercises (preferred) */}
+      {Array.isArray(plan.exercises) && plan.exercises.length > 0 ? (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            borderRadius: "8px",
+            padding: "12px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+          }}
+        >
+          {plan.exercises.map((ex, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                gap: "10px",
+                alignItems: "flex-start",
+              }}
+            >
+              <div
+                style={{
+                  flexShrink: 0,
+                  width: "22px",
+                  height: "22px",
+                  borderRadius: "50%",
+                  background: "#fb923c",
+                  color: "#0f172a",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "11px",
+                  fontWeight: 800,
+                  marginTop: "1px",
+                }}
+              >
+                {i + 1}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    color: "#f1f5f9",
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {ex.name}
+                </div>
+                {ex.prescription && (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      color: "#cbd5e1",
+                      marginTop: "2px",
+                      fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+                    }}
+                  >
+                    {ex.prescription}
+                  </div>
+                )}
+                {ex.note && (
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "#94a3b8",
+                      marginTop: "3px",
+                      fontStyle: "italic",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {ex.note}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        // Fallback: render raw session text (for legacy or malformed plans)
+        <div
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            borderRadius: "8px",
+            padding: "12px",
+            fontSize: "13px",
+            lineHeight: 1.65,
+            color: "#f1f5f9",
+            whiteSpace: "pre-wrap",
+            fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+          }}
+        >
+          {plan.sessionText || "(no session text)"}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
         <button
