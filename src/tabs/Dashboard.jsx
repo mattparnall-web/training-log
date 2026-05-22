@@ -145,34 +145,61 @@ function pickTrainingStatus(section) {
   const latest = d?.mostRecentTrainingStatus?.latestTrainingStatusData;
   if (!latest) return null;
 
-  const devices = Object.values(latest);
+  const deviceIds = Object.keys(latest);
+  const devices = deviceIds.map((id) => ({ id, ...latest[id] }));
   if (!devices.length) return null;
 
-  // If multiple Garmin devices are paired (watch + Edge etc), pick the entry
-  // with the most recent calendarDate / timestamp. The "first" device by object
-  // key order can lag behind the primary watch and report a stale status.
   const dateOf = (dev) =>
     dev?.calendarDate || dev?.statusDate || dev?.timestamp || "";
-  const mostRecent = devices.reduce(
-    (best, cur) => (dateOf(cur) > dateOf(best) ? cur : best),
-    devices[0]
-  );
+
+  // Prefer entries that look like a wristwatch's training-status payload:
+  // they usually carry richer metadata (acute training load, recovery time,
+  // resting HR baseline, etc.). Bike computers (Edge) typically have a sparser
+  // entry. Score each device on data richness, fall back to most-recent date.
+  const richnessScore = (dev) => {
+    let s = 0;
+    if (dev?.acwrFlash) s += 2;
+    if (dev?.recoveryTime != null) s += 2;
+    if (dev?.weeklyTrainingLoad != null) s += 1;
+    if (dev?.fitnessTrend != null) s += 1;
+    if (dev?.loadTunnelMin != null) s += 1;
+    return s;
+  };
+
+  // Sort by richness desc, then by date desc.
+  devices.sort((a, b) => {
+    const r = richnessScore(b) - richnessScore(a);
+    if (r !== 0) return r;
+    return (dateOf(b) || "").localeCompare(dateOf(a) || "");
+  });
+
+  const chosen = devices[0];
 
   // The composite "trainingStatusFeedbackPhrase" (e.g. MOD_RT_LOW_SS_MOD) is
   // Garmin's internal key — their app translates it to a sentence client-side.
   // We don't have the translation table so we just hide it.
-  const rawFeedback = mostRecent?.trainingStatusFeedbackPhrase ?? null;
+  const rawFeedback = chosen?.trainingStatusFeedbackPhrase ?? null;
   const friendlyFeedback =
     typeof rawFeedback === "string" && /^[A-Z0-9_]+$/.test(rawFeedback)
       ? null
       : rawFeedback;
 
+  // Diagnostic — every device's status, so we can debug "which one is the
+  // watch" without needing curl. Surfaced in the UI behind a "details" toggle.
+  const diagnostics = devices.map((dev) => ({
+    deviceId: dev.id,
+    status: humanTrainingStatus(dev.trainingStatus),
+    date: dateOf(dev),
+    richness: richnessScore(dev),
+    chosen: dev === chosen,
+  }));
+
   return {
-    status: humanTrainingStatus(mostRecent?.trainingStatus),
-    load:
-      mostRecent?.acwrFlash?.value ?? mostRecent?.weeklyTrainingLoad ?? null,
+    status: humanTrainingStatus(chosen?.trainingStatus),
+    load: chosen?.acwrFlash?.value ?? chosen?.weeklyTrainingLoad ?? null,
     feedback: friendlyFeedback,
-    source_date: dateOf(mostRecent) || null,
+    source_date: dateOf(chosen) || null,
+    diagnostics,
   };
 }
 function pickDailySummary(section) {
@@ -401,7 +428,10 @@ export default function Dashboard() {
   const day = dayDefFor(selectedDate);
 
   // ---- Garmin morning brief (with timeout + retry-friendly) ----
-  const fetchWithTimeout = async (url, ms = 25000) => {
+  // 40s timeout: cold-start (Python init ~3s) + 6 sequential Garmin calls
+  // (~1–4s each) can total ~25–35s. 40s gives comfortable headroom before
+  // abort, vs. our previous 25s which sometimes clipped legitimate slow calls.
+  const fetchWithTimeout = async (url, ms = 40000) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), ms);
     try {
@@ -822,13 +852,16 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* Training status — full width with feedback below */}
+            {/* Training status — full width with feedback below + diagnostic */}
             <div style={{ paddingTop: "12px", borderTop: `1px solid ${T.border}` }}>
               <Metric
                 label="TRAINING STATUS"
                 big={trainingStatus?.status || "—"}
                 sub={trainingStatus?.feedback || null}
               />
+              {trainingStatus?.diagnostics?.length > 1 && (
+                <TrainingStatusDiagnostic devices={trainingStatus.diagnostics} />
+              )}
             </div>
           </>
         )}
@@ -913,6 +946,59 @@ function Metric({ label, big, sub, tone }) {
       <div style={{ fontSize: "9px", letterSpacing: "0.15em", color: T.textMuted, fontWeight: 700, marginBottom: "4px" }}>{label}</div>
       <div style={{ fontSize: "20px", fontWeight: 700, color: toneColor, lineHeight: 1 }}>{big}</div>
       {sub && <div style={{ fontSize: "11px", color: T.textMuted, marginTop: "3px" }}>{sub}</div>}
+    </div>
+  );
+}
+
+function TrainingStatusDiagnostic({ devices }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginTop: "8px" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: T.textMuted,
+          fontSize: "10px",
+          letterSpacing: "0.1em",
+          fontWeight: 700,
+          cursor: "pointer",
+          padding: 0,
+        }}
+      >
+        {open ? "▼ HIDE PER-DEVICE BREAKDOWN" : `▸ ${devices.length} DEVICES — SHOW BREAKDOWN`}
+      </button>
+      {open && (
+        <div
+          style={{
+            marginTop: "8px",
+            background: T.surface2,
+            border: `1px solid ${T.border}`,
+            borderRadius: "8px",
+            padding: "10px",
+            fontSize: "11px",
+            fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+            color: T.textSub,
+            lineHeight: 1.6,
+          }}
+        >
+          {devices.map((d) => (
+            <div key={d.deviceId} style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+              <span style={{ color: T.textMuted }}>
+                device {d.deviceId}
+                {d.chosen ? " ✓" : ""}
+              </span>
+              <span style={{ color: T.text, fontWeight: 600 }}>
+                {d.status || "—"}{d.date ? ` · ${d.date}` : ""}
+              </span>
+            </div>
+          ))}
+          <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: `1px dashed ${T.border2}`, fontSize: "10px", color: T.textMuted }}>
+            ✓ = displayed above. Tap the deviceId on your Garmin watch (Settings → System → About) and paste it to Coach Claude to pin your watch as primary.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
