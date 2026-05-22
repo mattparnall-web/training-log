@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import CoachSessionImporter from "./CoachSessionImporter.jsx";
 
 // --- SUPABASE CONFIG ---
 const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
@@ -724,6 +725,7 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   const [notes, setNotes] = useState("");
   const [rpe, setRpe] = useState("");
   const [showScanner, setShowScanner] = useState(false);
+  const [showCoachImporter, setShowCoachImporter] = useState(false);
   const [showAmrap, setShowAmrap] = useState(false);
   const [showEmom, setShowEmom] = useState(false);
   const [showCardio, setShowCardio] = useState(false);
@@ -755,6 +757,14 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
   return (
     <>
       {showScanner && <WhiteboardImporter day={day} onImported={handleImported} onCancel={() => setShowScanner(false)} />}
+      {showCoachImporter && (
+        <CoachSessionImporter
+          day={day}
+          date={date}
+          onImported={(exs, n) => { handleImported(exs, n); setShowCoachImporter(false); }}
+          onCancel={() => setShowCoachImporter(false)}
+        />
+      )}
       <div style={{ position: "fixed", inset: 0, background: T.overlay, zIndex: 100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "20px", overflowY: "auto" }}>
         <div style={{ background: T.surface, border: `1px solid ${day.color}44`, borderRadius: "16px", width: "100%", maxWidth: "520px", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.12)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
@@ -767,10 +777,17 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
 
           <button onClick={() => setShowScanner(true)} style={{
             width: "100%", background: "#ecfeff", border: "1px solid #a5f3fc",
-            borderRadius: "12px", padding: "14px", marginBottom: "10px",
+            borderRadius: "12px", padding: "14px", marginBottom: "8px",
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
             color: "#0891b2", fontSize: "13px", fontWeight: "700", letterSpacing: "0.06em", fontFamily: "inherit"
           }}><CameraIcon /> SCAN WHITEBOARD PHOTO</button>
+
+          <button onClick={() => setShowCoachImporter(true)} style={{
+            width: "100%", background: "#fff7ed", border: "1px solid #fed7aa",
+            borderRadius: "12px", padding: "14px", marginBottom: "10px",
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
+            color: "#c2410c", fontSize: "13px", fontWeight: "700", letterSpacing: "0.06em", fontFamily: "inherit"
+          }}>🧠 IMPORT COACH CLAUDE SESSION</button>
 
           {/* Complex + Cardio buttons */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px", marginBottom: "16px" }}>

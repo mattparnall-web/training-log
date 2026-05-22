@@ -139,6 +139,33 @@ function humanTrainingStatus(raw) {
   return null;
 }
 
+// Try several fields — Garmin returns `trainingStatus` as int OR string,
+// sometimes alongside `trainingStatusType` which is the friendly string.
+function readStatusValue(dev) {
+  if (!dev) return null;
+  const candidates = [
+    dev.trainingStatusType,
+    dev.trainingStatus,
+    dev.status,
+    dev?.trainingStatusObj?.type,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.length > 0 && !/^[A-Z0-9_]+$/.test(c)) {
+      // human-readable string like "Productive" — use directly
+      return c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
+    }
+    if (typeof c === "string" && /^[A-Z]+$/.test(c)) {
+      // All-caps single-word like "PRODUCTIVE" — title case it
+      return c.charAt(0) + c.slice(1).toLowerCase();
+    }
+    if (typeof c === "number") {
+      return humanTrainingStatus(c);
+    }
+  }
+  // Fall back to whatever humanTrainingStatus can salvage from trainingStatus.
+  return humanTrainingStatus(dev.trainingStatus);
+}
+
 function pickTrainingStatus(section) {
   const d = section?.data;
   if (!d) return null;
@@ -152,10 +179,9 @@ function pickTrainingStatus(section) {
   const dateOf = (dev) =>
     dev?.calendarDate || dev?.statusDate || dev?.timestamp || "";
 
-  // Prefer entries that look like a wristwatch's training-status payload:
-  // they usually carry richer metadata (acute training load, recovery time,
-  // resting HR baseline, etc.). Bike computers (Edge) typically have a sparser
-  // entry. Score each device on data richness, fall back to most-recent date.
+  // Wristwatches typically carry richer training-status metadata than bike
+  // computers (Edge), so score each device on data richness as a heuristic
+  // for "this is the daily-wear watch". Tie-break by recency.
   const richnessScore = (dev) => {
     let s = 0;
     if (dev?.acwrFlash) s += 2;
@@ -163,10 +189,11 @@ function pickTrainingStatus(section) {
     if (dev?.weeklyTrainingLoad != null) s += 1;
     if (dev?.fitnessTrend != null) s += 1;
     if (dev?.loadTunnelMin != null) s += 1;
+    if (dev?.sleepStress != null) s += 1;
+    if (dev?.restingHeartRate != null) s += 1;
     return s;
   };
 
-  // Sort by richness desc, then by date desc.
   devices.sort((a, b) => {
     const r = richnessScore(b) - richnessScore(a);
     if (r !== 0) return r;
@@ -177,25 +204,26 @@ function pickTrainingStatus(section) {
 
   // The composite "trainingStatusFeedbackPhrase" (e.g. MOD_RT_LOW_SS_MOD) is
   // Garmin's internal key — their app translates it to a sentence client-side.
-  // We don't have the translation table so we just hide it.
   const rawFeedback = chosen?.trainingStatusFeedbackPhrase ?? null;
   const friendlyFeedback =
     typeof rawFeedback === "string" && /^[A-Z0-9_]+$/.test(rawFeedback)
       ? null
       : rawFeedback;
 
-  // Diagnostic — every device's status, so we can debug "which one is the
-  // watch" without needing curl. Surfaced in the UI behind a "details" toggle.
+  // Diagnostic — surface raw + interpreted values from EVERY device so we can
+  // see exactly what Garmin returned and which we picked.
   const diagnostics = devices.map((dev) => ({
     deviceId: dev.id,
-    status: humanTrainingStatus(dev.trainingStatus),
+    status: readStatusValue(dev),
+    rawTrainingStatus: dev.trainingStatus,
+    rawTrainingStatusType: dev.trainingStatusType,
     date: dateOf(dev),
     richness: richnessScore(dev),
     chosen: dev === chosen,
   }));
 
   return {
-    status: humanTrainingStatus(chosen?.trainingStatus),
+    status: readStatusValue(chosen),
     load: chosen?.acwrFlash?.value ?? chosen?.weeklyTrainingLoad ?? null,
     feedback: friendlyFeedback,
     source_date: dateOf(chosen) || null,
@@ -984,18 +1012,26 @@ function TrainingStatusDiagnostic({ devices }) {
           }}
         >
           {devices.map((d) => (
-            <div key={d.deviceId} style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
-              <span style={{ color: T.textMuted }}>
-                device {d.deviceId}
-                {d.chosen ? " ✓" : ""}
-              </span>
-              <span style={{ color: T.text, fontWeight: 600 }}>
-                {d.status || "—"}{d.date ? ` · ${d.date}` : ""}
-              </span>
+            <div key={d.deviceId} style={{ marginBottom: "6px", paddingBottom: "6px", borderBottom: `1px dashed ${T.border2}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+                <span style={{ color: T.textMuted }}>
+                  device {d.deviceId}
+                  {d.chosen ? " ✓" : ""}
+                </span>
+                <span style={{ color: T.text, fontWeight: 600 }}>
+                  {d.status || "—"}
+                </span>
+              </div>
+              <div style={{ fontSize: "10px", color: T.textMuted, marginTop: "2px" }}>
+                rawStatus={String(d.rawTrainingStatus)}
+                {d.rawTrainingStatusType ? ` · type="${d.rawTrainingStatusType}"` : ""}
+                {d.date ? ` · ${d.date}` : ""}
+                {" · "}richness={d.richness}
+              </div>
             </div>
           ))}
-          <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: `1px dashed ${T.border2}`, fontSize: "10px", color: T.textMuted }}>
-            ✓ = displayed above. Tap the deviceId on your Garmin watch (Settings → System → About) and paste it to Coach Claude to pin your watch as primary.
+          <div style={{ marginTop: "8px", fontSize: "10px", color: T.textMuted }}>
+            ✓ = the one shown above. If the wrong device is winning, screenshot this panel and paste it back to me — I'll pin your watch's deviceId so it's always preferred.
           </div>
         </div>
       )}
