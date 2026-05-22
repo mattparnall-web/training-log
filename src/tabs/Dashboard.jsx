@@ -887,7 +887,7 @@ export default function Dashboard() {
                 big={trainingStatus?.status || "—"}
                 sub={trainingStatus?.feedback || null}
               />
-              {trainingStatus?.diagnostics?.length > 1 && (
+              {trainingStatus?.diagnostics?.length >= 1 && (
                 <TrainingStatusDiagnostic devices={trainingStatus.diagnostics} />
               )}
             </div>
