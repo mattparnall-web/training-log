@@ -114,7 +114,35 @@ function pickReadiness(section) {
     recovery_time: r.recoveryTime ?? null,
   };
 }
-// Garmin's training status integer enum → friendly name.
+// NOTE: Garmin's integer `trainingStatus` enum varies by firmware — same
+// integer means different things across watch generations. The reliable
+// source of truth is `trainingStatusFeedbackPhrase` (e.g. "PRODUCTIVE_3",
+// "MAINTAINING_2", "RECOVERY_1") because the leading word IS the status.
+//
+// We use the phrase first, fall back to the integer only when the phrase is
+// missing or unrecognised.
+
+const PHRASE_STATUS_MAP = {
+  PRODUCTIVE: "Productive",
+  MAINTAINING: "Maintaining",
+  UNPRODUCTIVE: "Unproductive",
+  RECOVERY: "Recovery",
+  DETRAINING: "Detraining",
+  PEAKING: "Peaking",
+  OVERREACHING: "Overreaching",
+  STRAINED: "Strained",
+  NO_STATUS: "No Status",
+  PAUSED: "Paused",
+};
+
+function statusFromFeedbackPhrase(phrase) {
+  if (typeof phrase !== "string" || !phrase) return null;
+  // Strip trailing "_<digit>" intensity suffix, e.g. PRODUCTIVE_3 -> PRODUCTIVE.
+  const base = phrase.replace(/_\d+$/, "");
+  return PHRASE_STATUS_MAP[base] || null;
+}
+
+// Legacy integer-enum fallback (may be wrong on your firmware).
 const TRAINING_STATUS_NAMES = {
   0: "No Status",
   1: "Detraining",
@@ -131,38 +159,42 @@ function humanTrainingStatus(raw) {
   if (raw == null) return null;
   if (typeof raw === "number") return TRAINING_STATUS_NAMES[raw] || `Status ${raw}`;
   if (typeof raw === "string") {
-    // If it looks like a composite key (underscores), it's the wrong field
-    // (that's the feedback phrase key, not the status). Bail.
     if (raw.includes("_")) return null;
     return raw.charAt(0) + raw.slice(1).toLowerCase();
   }
   return null;
 }
 
-// Try several fields — Garmin returns `trainingStatus` as int OR string,
-// sometimes alongside `trainingStatusType` which is the friendly string.
+// Garmin's load-balance feedback phrases — directly actionable for coaching.
+const LOAD_BALANCE_PHRASES = {
+  BALANCED: "Load is balanced",
+  AEROBIC_LOW_SHORTAGE: "Need more low aerobic (Z1–Z2)",
+  AEROBIC_LOW_EXCESS: "Too much low aerobic",
+  AEROBIC_HIGH_SHORTAGE: "Need more high aerobic (Z3–Z4)",
+  AEROBIC_HIGH_EXCESS: "Too much high aerobic",
+  ANAEROBIC_SHORTAGE: "Need more anaerobic work",
+  ANAEROBIC_EXCESS: "Too much anaerobic work",
+  AEROBIC_LOW_HIGH_SHORTAGE: "Need more aerobic (both zones)",
+  AEROBIC_LOW_AND_ANAEROBIC_SHORTAGE: "Need more low aerobic + anaerobic",
+  AEROBIC_HIGH_AND_ANAEROBIC_SHORTAGE: "Need more high aerobic + anaerobic",
+};
+
+function friendlyLoadBalance(phrase) {
+  if (typeof phrase !== "string" || !phrase) return null;
+  return LOAD_BALANCE_PHRASES[phrase] || phrase.replace(/_/g, " ").toLowerCase();
+}
+
+// Read the training status from a device entry.
+// Priority: the feedback phrase (most reliable across firmwares) > the
+// integer enum (varies by firmware — unreliable).
 function readStatusValue(dev) {
   if (!dev) return null;
-  const candidates = [
-    dev.trainingStatusType,
-    dev.trainingStatus,
-    dev.status,
-    dev?.trainingStatusObj?.type,
-  ];
-  for (const c of candidates) {
-    if (typeof c === "string" && c.length > 0 && !/^[A-Z0-9_]+$/.test(c)) {
-      // human-readable string like "Productive" — use directly
-      return c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
-    }
-    if (typeof c === "string" && /^[A-Z]+$/.test(c)) {
-      // All-caps single-word like "PRODUCTIVE" — title case it
-      return c.charAt(0) + c.slice(1).toLowerCase();
-    }
-    if (typeof c === "number") {
-      return humanTrainingStatus(c);
-    }
+  const fromPhrase = statusFromFeedbackPhrase(dev.trainingStatusFeedbackPhrase);
+  if (fromPhrase) return fromPhrase;
+  if (typeof dev.trainingStatusType === "string" && dev.trainingStatusType.length > 0) {
+    const s = dev.trainingStatusType;
+    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
   }
-  // Fall back to whatever humanTrainingStatus can salvage from trainingStatus.
   return humanTrainingStatus(dev.trainingStatus);
 }
 
@@ -202,13 +234,15 @@ function pickTrainingStatus(section) {
 
   const chosen = devices[0];
 
-  // The composite "trainingStatusFeedbackPhrase" (e.g. MOD_RT_LOW_SS_MOD) is
-  // Garmin's internal key — their app translates it to a sentence client-side.
-  const rawFeedback = chosen?.trainingStatusFeedbackPhrase ?? null;
-  const friendlyFeedback =
-    typeof rawFeedback === "string" && /^[A-Z0-9_]+$/.test(rawFeedback)
-      ? null
-      : rawFeedback;
+  // Now that we use the feedback phrase to derive the status itself, the
+  // most useful "sub" line is the LOAD BALANCE feedback — which tells the
+  // athlete WHAT to do (more Z1–Z2, less anaerobic, etc.) rather than just
+  // describing where they are.
+  const loadBalanceMap = d?.mostRecentTrainingLoadBalance?.metricsTrainingLoadBalanceDTOMap;
+  const loadBalanceEntry = loadBalanceMap ? Object.values(loadBalanceMap)[0] : null;
+  const loadBalanceFeedback = friendlyLoadBalance(
+    loadBalanceEntry?.trainingBalanceFeedbackPhrase
+  );
 
   // Diagnostic — surface raw + interpreted values from EVERY device so we can
   // see exactly what Garmin returned and which we picked.
@@ -225,11 +259,12 @@ function pickTrainingStatus(section) {
   return {
     status: readStatusValue(chosen),
     load: chosen?.acwrFlash?.value ?? chosen?.weeklyTrainingLoad ?? null,
-    feedback: friendlyFeedback,
+    feedback: loadBalanceFeedback,
+    loadBalanceFeedback,
+    loadBalanceRaw: loadBalanceEntry?.trainingBalanceFeedbackPhrase || null,
+    feedbackPhrase: chosen?.trainingStatusFeedbackPhrase || null,
     source_date: dateOf(chosen) || null,
     diagnostics,
-    // Full raw response so we can see every field, in case the "real" status
-    // lives outside latestTrainingStatusData (e.g. in mostRecentTrainingLoadBalance).
     rawTopLevelKeys: Object.keys(d || {}),
     rawSnapshot: d,
   };
@@ -305,7 +340,8 @@ LAST NIGHT / TODAY'S RECOVERY (from Garmin):
   - HRV (last night): ${hrv?.last_night_avg ?? "n/a"}ms; status: ${hrv?.status ?? "n/a"}; 7d avg: ${hrv?.weekly_avg ?? "n/a"}
   - Body Battery: current ${bb?.current ?? "n/a"}, range ${bb?.min ?? "?"}–${bb?.max ?? "?"}; charged ${bb?.charged ?? "?"}, drained ${bb?.drained ?? "?"}
   - Training readiness: ${readiness?.score ?? "n/a"}/100 (${readiness?.level ?? "n/a"})
-  - Training status: ${status?.status ?? "n/a"}${status?.feedback ? ` — ${status.feedback}` : ""}
+  - Training status: ${status?.status ?? "n/a"}
+  - Training load balance: ${status?.loadBalanceFeedback ?? "n/a"}${status?.loadBalanceRaw ? ` (Garmin code: ${status.loadBalanceRaw})` : ""}
 
 YESTERDAY'S INTAKE:
   - Calories: ${yIntake?.calories ?? 0} kcal
