@@ -104,19 +104,54 @@ function pickReadiness(section) {
     recovery_time: r.recoveryTime ?? null,
   };
 }
+// Garmin's training status integer enum → friendly name.
+const TRAINING_STATUS_NAMES = {
+  0: "No Status",
+  1: "Detraining",
+  2: "Recovery",
+  3: "Maintaining",
+  4: "Productive",
+  5: "Peaking",
+  6: "Overreaching",
+  7: "Unproductive",
+  8: "Strained",
+};
+
+function humanTrainingStatus(raw) {
+  if (raw == null) return null;
+  if (typeof raw === "number") return TRAINING_STATUS_NAMES[raw] || `Status ${raw}`;
+  if (typeof raw === "string") {
+    // If it looks like a composite key (underscores), it's the wrong field
+    // (that's the feedback phrase key, not the status). Bail.
+    if (raw.includes("_")) return null;
+    return raw.charAt(0) + raw.slice(1).toLowerCase();
+  }
+  return null;
+}
+
 function pickTrainingStatus(section) {
   const d = section?.data;
   if (!d) return null;
   const latest = d?.mostRecentTrainingStatus?.latestTrainingStatusData;
-  if (latest) {
-    const firstDevice = Object.values(latest)[0];
-    return {
-      status: firstDevice?.trainingStatus ?? null,
-      load: firstDevice?.acwrFlash?.value ?? firstDevice?.weeklyTrainingLoad ?? null,
-      feedback: firstDevice?.trainingStatusFeedbackPhrase ?? null,
-    };
-  }
-  return null;
+  if (!latest) return null;
+  const firstDevice = Object.values(latest)[0];
+  if (!firstDevice) return null;
+
+  // The composite "trainingStatusFeedbackPhrase" (e.g. MOD_RT_LOW_SS_MOD) is
+  // Garmin's internal key — their app translates it to a sentence client-side.
+  // We don't have the translation table so we just hide it.
+  const rawFeedback = firstDevice?.trainingStatusFeedbackPhrase ?? null;
+  const friendlyFeedback =
+    typeof rawFeedback === "string" && /^[A-Z0-9_]+$/.test(rawFeedback)
+      ? null
+      : rawFeedback;
+
+  return {
+    status: humanTrainingStatus(firstDevice?.trainingStatus),
+    load:
+      firstDevice?.acwrFlash?.value ?? firstDevice?.weeklyTrainingLoad ?? null,
+    feedback: friendlyFeedback,
+  };
 }
 function pickDailySummary(section) {
   const d = section?.data;
@@ -263,6 +298,10 @@ export default function Dashboard() {
   const [garminLoading, setGarminLoading] = useState(true);
   const [garminError, setGarminError] = useState(null);
 
+  // Separate fetch for yesterday's activity card when viewing today
+  // (today's steps/RHR are meaningless at 7am — show yesterday's instead).
+  const [yesterdayActivity, setYesterdayActivity] = useState(null);
+
   const [settings, setSettings] = useState(null);
   const [foodYesterday, setFoodYesterday] = useState([]);
   const [alcoholYesterday, setAlcoholYesterday] = useState([]);
@@ -277,22 +316,51 @@ export default function Dashboard() {
   const isToday = selectedDate === todayString();
   const day = dayDefFor(selectedDate);
 
-  // ---- Garmin morning brief ----
+  // ---- Garmin morning brief (with timeout + retry-friendly) ----
+  const fetchWithTimeout = async (url, ms = 25000) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await fetch(url, { signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   const loadGarmin = useCallback(async () => {
     setGarminLoading(true);
     setGarminError(null);
     try {
-      const r = await fetch(`/api/garmin-data?date=${selectedDate}`);
+      const r = await fetchWithTimeout(`/api/garmin-data?date=${selectedDate}`);
       if (!r.ok) {
         const t = await r.text();
-        throw new Error(`Garmin proxy ${r.status}: ${t.slice(0, 200)}`);
+        throw new Error(`Garmin ${r.status}: ${t.slice(0, 200)}`);
       }
       setGarmin(await r.json());
     } catch (e) {
-      setGarminError(e.message);
+      const msg = e?.name === "AbortError"
+        ? "Garmin timed out — server may be cold-starting. Tap retry."
+        : e?.message || String(e);
+      setGarminError(msg);
       setGarmin(null);
     } finally {
       setGarminLoading(false);
+    }
+
+    // When viewing today, fetch yesterday's activity in parallel so the
+    // "ACTIVITY" card shows meaningful numbers (today's are mostly zero at 7am).
+    if (selectedDate === todayString()) {
+      try {
+        const r = await fetchWithTimeout(
+          `/api/garmin-data?date=${shiftDate(selectedDate, -1)}`
+        );
+        if (r.ok) setYesterdayActivity(await r.json());
+        else setYesterdayActivity(null);
+      } catch {
+        setYesterdayActivity(null);
+      }
+    } else {
+      setYesterdayActivity(null);
     }
   }, [selectedDate]);
 
@@ -410,7 +478,11 @@ export default function Dashboard() {
   const hrv = pickHRV(garmin?.hrv);
   const readiness = pickReadiness(garmin?.training_readiness);
   const trainingStatus = pickTrainingStatus(garmin?.training_status);
-  const daily = pickDailySummary(garmin?.daily_summary);
+  // Activity card data: when viewing today, prefer yesterday (today's not
+  // meaningful in the morning). Otherwise show the selected date's own data.
+  const activitySource = isToday ? yesterdayActivity : garmin;
+  const activityDateStr = isToday ? yesterdayStr : selectedDate;
+  const daily = pickDailySummary(activitySource?.daily_summary);
 
   const yCalories = Math.round(foodYesterday.reduce((a, e) => a + Number(e.calories || 0), 0));
   const yProtein = Math.round(foodYesterday.reduce((a, e) => a + Number(e.protein_g || 0), 0));
@@ -544,15 +616,43 @@ export default function Dashboard() {
         {garminLoading ? (
           <div style={{ fontSize: "13px", color: T.textSub }}>Fetching Garmin data…</div>
         ) : garminError ? (
-          <div style={{ fontSize: "12px", color: T.warn, background: "#fee2e2", padding: "8px 10px", borderRadius: "6px" }}>
-            {garminError}
+          <div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: T.warn,
+                background: "#fee2e2",
+                padding: "8px 10px",
+                borderRadius: "6px",
+                marginBottom: "8px",
+              }}
+            >
+              {garminError}
+            </div>
+            <button
+              onClick={loadGarmin}
+              style={{
+                width: "100%",
+                padding: "10px",
+                background: T.surface2,
+                border: `1px solid ${T.border2}`,
+                borderRadius: "8px",
+                color: T.text,
+                fontSize: "12px",
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                cursor: "pointer",
+              }}
+            >
+              🔄 RETRY
+            </button>
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
             <Metric label="SLEEP" big={hoursMinutes(sleep?.duration_seconds)} sub={sleep?.score != null ? `Score: ${sleep.score}` : null} />
             <Metric label="BODY BATTERY" big={valueOrDash(bb?.current ?? bb?.max)} sub={bb?.max != null && bb?.min != null ? `${bb.min}–${bb.max}` : null} />
             <Metric label="HRV (LAST NIGHT)" big={valueOrDash(hrv?.last_night_avg, "ms")} sub={hrv?.status ? hrv.status : (hrv?.weekly_avg != null ? `7d avg ${hrv.weekly_avg}` : null)} />
-            <Metric label="TRAINING STATUS" big={trainingStatus?.status || "—"} sub={trainingStatus?.feedback ? trainingStatus.feedback.slice(0, 60) : null} />
+            <Metric label="TRAINING STATUS" big={trainingStatus?.status || "—"} sub={trainingStatus?.feedback || null} />
           </div>
         )}
       </Card>
@@ -588,7 +688,9 @@ export default function Dashboard() {
 
       {daily && (
         <Card>
-          <CardLabel>{isToday ? "TODAY · ACTIVITY" : prettyDate(selectedDate).toUpperCase()}</CardLabel>
+          <CardLabel>
+            {isToday ? "YESTERDAY · ACTIVITY" : prettyDate(activityDateStr).toUpperCase() + " · ACTIVITY"}
+          </CardLabel>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
             <Metric label="STEPS" big={valueOrDash(daily.steps)} sub={daily.step_goal ? `Goal ${daily.step_goal}` : null} />
             <Metric label="RESTING HR" big={valueOrDash(daily.resting_heart_rate, " bpm")} />
