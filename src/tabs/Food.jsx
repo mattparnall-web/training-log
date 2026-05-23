@@ -4,13 +4,28 @@ import {
   todayString, startOfDayLocal, endOfDayLocal,
   noonOf, prettyDate, timeOf, dateStrOf,
   SubTabs, DateBar, HistoryView, CalendarMonthView,
-  dayDefFor, nutritionTargetsFor,
+  dayDefFor, nutritionTargetsFor, ErrorBanner,
 } from "./_shared.jsx";
 
 // ---- Anthropic proxy (same one the whiteboard scanner uses) ----
 const PROXY_URL = "/api/proxy";
 const MODEL = "claude-sonnet-4-5";
 const LOOKBACK_DAYS = 90;
+
+// ---- One-tap presets (frequent foods logged with a single tap) ----
+// Each preset writes a food_entries row directly — no review modal.
+const QUICK_FOODS = [
+  {
+    id: "protein_shake",
+    emoji: "🥤",
+    name: "Protein shake",
+    calories: 240,
+    protein_g: 48,
+    carbs_g: 6,
+    fat_g: null,
+    color: "#16a34a",
+  },
+];
 
 async function callClaude(body) {
   const r = await fetch(PROXY_URL, {
@@ -134,6 +149,7 @@ export default function Food() {
   const [busyMode, setBusyMode] = useState(null);
   const [textInput, setTextInput] = useState("");
   const [showTextEntry, setShowTextEntry] = useState(false);
+  const [quickLogBusy, setQuickLogBusy] = useState(null);
   const fileInputRef = useRef(null);
 
   const isToday = selectedDate === todayString();
@@ -228,6 +244,35 @@ export default function Food() {
       setError(e.message);
     } finally {
       setBusyMode(null);
+    }
+  };
+
+  // One-tap log: write straight to food_entries with the preset's macros.
+  const quickLogPreset = async (preset) => {
+    setQuickLogBusy(preset.id);
+    setError(null);
+    try {
+      const consumed = isToday ? new Date() : noonOf(selectedDate);
+      const row = {
+        consumed_at: consumed.toISOString(),
+        source: "quick",
+        name: preset.name,
+        calories: preset.calories,
+        protein_g: preset.protein_g,
+        carbs_g: preset.carbs_g,
+        fat_g: preset.fat_g,
+        ai_confidence: null,
+        ai_notes: null,
+      };
+      const created = await sb("/food_entries", {
+        method: "POST",
+        body: JSON.stringify(row),
+      });
+      setEntries((prev) => [created[0], ...prev]);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setQuickLogBusy(null);
     }
   };
 
@@ -406,20 +451,15 @@ export default function Food() {
         ]}
       />
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: "10px 12px",
-            borderRadius: "8px",
-            marginBottom: "16px",
-            fontSize: "13px",
-          }}
-        >
-          {error}
-        </div>
-      )}
+      <ErrorBanner
+        message={error}
+        onRetry={() => {
+          setError(null);
+          setLoading(true);
+          load();
+        }}
+      />
+
 
       {/* =================== LOG VIEW =================== */}
       {view === "log" && (
@@ -474,6 +514,67 @@ export default function Food() {
               progress={carbsPct}
               color={carbsTone || T.textMuted}
             />
+          </div>
+
+          {/* ---- Quick log (one-tap presets like protein shake) ---- */}
+          <div style={{ marginBottom: "20px" }}>
+            <div
+              style={{
+                fontSize: "11px",
+                letterSpacing: "0.15em",
+                color: T.textMuted,
+                fontWeight: 600,
+                marginBottom: "10px",
+              }}
+            >
+              QUICK LOG
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "8px",
+              }}
+            >
+              {QUICK_FOODS.map((preset) => {
+                const busy = quickLogBusy === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    onClick={() => quickLogPreset(preset)}
+                    disabled={!!quickLogBusy}
+                    style={{
+                      background: T.surface,
+                      border: `1px solid ${T.border}`,
+                      borderLeft: `4px solid ${preset.color}`,
+                      borderRadius: "10px",
+                      padding: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      cursor: quickLogBusy ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      textAlign: "left",
+                      opacity: quickLogBusy && !busy ? 0.5 : 1,
+                      transition: "transform 0.08s",
+                      transform: busy ? "scale(0.97)" : "scale(1)",
+                    }}
+                  >
+                    <div style={{ fontSize: "22px", lineHeight: 1 }}>{preset.emoji}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: "13px", fontWeight: 700, color: T.text }}>
+                        {preset.name}
+                      </div>
+                      <div style={{ fontSize: "10px", color: T.textMuted, marginTop: "2px" }}>
+                        {preset.calories} cal · P {preset.protein_g}
+                        {preset.carbs_g != null ? ` · C ${preset.carbs_g}` : ""}
+                        {preset.fat_g != null ? ` · F ${preset.fat_g}` : ""}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div style={{ marginBottom: "20px" }}>

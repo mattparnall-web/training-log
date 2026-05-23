@@ -10,19 +10,104 @@ import { useState } from "react";
 export const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
 export const SUPABASE_KEY = "sb_publishable__8dc2jqeQIClVXwpZQCSWA_Y5yaV1ao";
 
+// Retry policy for transient network failures.
+// iOS Safari (and the installed PWA) throws "Load failed" when fetch() itself
+// errors — typically a network blip when the app wakes from background, DNS
+// hiccup, or a dropped connection. These almost always recover on a quick retry.
+// We do NOT retry HTTP errors (4xx/5xx) — those are real problems that need
+// surfacing to the user (e.g. the nutrition_targets column being missing).
+const SB_MAX_RETRIES = 2;
+const SB_RETRY_DELAY_MS = [300, 800]; // backoff between attempts
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientNetworkError(err) {
+  // Browsers throw a plain TypeError with messages like "Load failed",
+  // "Failed to fetch", "NetworkError", or "The network connection was lost".
+  if (!err) return false;
+  if (err.name === "TypeError") return true;
+  const msg = String(err.message || "").toLowerCase();
+  return (
+    msg.includes("load failed") ||
+    msg.includes("failed to fetch") ||
+    msg.includes("network") ||
+    msg.includes("connection")
+  );
+}
+
 export async function sb(path, options = {}) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-      ...(options.headers || {}),
-    },
-  });
-  if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`);
-  return r.status === 204 ? null : r.json();
+  let lastErr;
+  for (let attempt = 0; attempt <= SB_MAX_RETRIES; attempt++) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
+        ...options,
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+          ...(options.headers || {}),
+        },
+      });
+      if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`);
+      return r.status === 204 ? null : r.json();
+    } catch (err) {
+      lastErr = err;
+      // Only retry on a transient network failure.
+      if (!isTransientNetworkError(err) || attempt === SB_MAX_RETRIES) {
+        throw err;
+      }
+      await wait(SB_RETRY_DELAY_MS[attempt] ?? 800);
+    }
+  }
+  throw lastErr;
+}
+
+// Shared error banner with a Retry button.
+// Use across tabs to give users an explicit recovery action when the data
+// load fails (instead of a dead-end red banner).
+export function ErrorBanner({ message, onRetry }) {
+  if (!message) return null;
+  return (
+    <div
+      style={{
+        background: "#fee2e2",
+        color: "#991b1b",
+        padding: "10px 12px",
+        borderRadius: "8px",
+        marginBottom: "16px",
+        fontSize: "13px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "10px",
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0, wordBreak: "break-word" }}>{message}</div>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          style={{
+            background: "#fff",
+            color: "#991b1b",
+            border: "1px solid #fca5a5",
+            borderRadius: "6px",
+            padding: "6px 12px",
+            fontSize: "12px",
+            fontWeight: 700,
+            letterSpacing: "0.05em",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            flexShrink: 0,
+          }}
+        >
+          RETRY
+        </button>
+      )}
+    </div>
+  );
 }
 
 // ---------- Design tokens ----------

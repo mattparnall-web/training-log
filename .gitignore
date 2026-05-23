@@ -1,0 +1,27 @@
+# Dependencies — installed locally / on Vercel build, never committed.
+node_modules/
+
+# Vite build output — Vercel generates this from source on each deploy.
+dist/
+
+# Lock file is intentionally NOT tracked for this repo —
+# Mac-generated npm locks have broken Vercel builds before. Vercel resolves
+# dependencies from package.json directly.
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# macOS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+*.log
+npm-debug.log*
+
+# Vercel local cache
+.vercel/

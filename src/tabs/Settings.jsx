@@ -1,23 +1,8 @@
 import { useState, useEffect } from "react";
-
-// ----- Supabase config (same project / key as the rest of the app) -----
-const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
-const SUPABASE_KEY = "sb_publishable__8dc2jqeQIClVXwpZQCSWA_Y5yaV1ao";
-
-async function sb(path, options = {}) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-      ...(options.headers || {}),
-    },
-  });
-  if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`);
-  return r.status === 204 ? null : r.json();
-}
+// Reuse the shared Supabase helper (with retry-on-network-failure) and the
+// shared ErrorBanner with a Retry button. Previously this file had its own
+// sb() copy, which meant Settings didn't benefit from the retry logic.
+import { sb, ErrorBanner } from "./_shared.jsx";
 
 // ----- design tokens (matches WorkoutTracker) -----
 const T = {
@@ -199,20 +184,37 @@ export default function Settings() {
         TARGETS · KEY LIFTS
       </div>
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: "10px 12px",
-            borderRadius: "8px",
-            marginBottom: "16px",
-            fontSize: "13px",
-          }}
-        >
-          {error}
-        </div>
-      )}
+      <ErrorBanner
+        message={error}
+        onRetry={() => {
+          setError(null);
+          setLoading(true);
+          // Re-run the mount loader by hitting the settings endpoint again.
+          (async () => {
+            try {
+              const rows = await sb("/settings?select=*&id=eq.1");
+              const row = rows?.[0];
+              if (row) {
+                setCalTarget(row.daily_calorie_target ?? "");
+                setProteinTarget(row.daily_protein_target_g ?? "");
+                setAlcoholTarget(row.weekly_alcohol_units_target ?? "");
+                setKeyLifts(Array.isArray(row.key_lifts) ? row.key_lifts : []);
+                const nt = row.nutrition_targets || {};
+                setNutritionTargets({
+                  rest:    { calories: nt.rest?.calories    ?? "", protein_g: nt.rest?.protein_g    ?? "", fat_g: nt.rest?.fat_g    ?? "", carbs_g: nt.rest?.carbs_g    ?? "" },
+                  lifting: { calories: nt.lifting?.calories ?? "", protein_g: nt.lifting?.protein_g ?? "", fat_g: nt.lifting?.fat_g ?? "", carbs_g: nt.lifting?.carbs_g ?? "" },
+                  big:     { calories: nt.big?.calories     ?? "", protein_g: nt.big?.protein_g     ?? "", fat_g: nt.big?.fat_g     ?? "", carbs_g: nt.big?.carbs_g     ?? "" },
+                });
+              }
+            } catch (e) {
+              setError(e.message);
+            } finally {
+              setLoading(false);
+            }
+          })();
+        }}
+      />
+
 
       {/* ---- Nutrition targets (per day-type bucket) ---- */}
       <div style={sectionStyle}>

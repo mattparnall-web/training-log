@@ -3,7 +3,7 @@ import {
   sb, T, display, inputStyle,
   todayString, startOfDayLocal, endOfDayLocal,
   startOfWeekFor, endOfWeekFor, noonOf, prettyDate, timeOf, dateStrOf,
-  SubTabs, DateBar, HistoryView, CalendarMonthView,
+  SubTabs, DateBar, HistoryView, CalendarMonthView, ErrorBanner,
 } from "./_shared.jsx";
 
 // ---- Drink catalogue (UK alcohol units + rough calories) ----
@@ -194,20 +194,15 @@ export default function Alcohol() {
         ]}
       />
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: "10px 12px",
-            borderRadius: "8px",
-            marginBottom: "16px",
-            fontSize: "13px",
-          }}
-        >
-          {error}
-        </div>
-      )}
+      <ErrorBanner
+        message={error}
+        onRetry={() => {
+          setError(null);
+          setLoading(true);
+          load();
+        }}
+      />
+
 
       {/* =================== LOG VIEW =================== */}
       {view === "log" && (

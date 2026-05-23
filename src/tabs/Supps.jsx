@@ -3,12 +3,12 @@ import {
   sb, T, display, inputStyle,
   todayString, startOfDayLocal, endOfDayLocal,
   noonOf, prettyDate, timeOf, dateStrOf,
-  SubTabs, DateBar, HistoryView, CalendarMonthView,
+  SubTabs, DateBar, HistoryView, CalendarMonthView, ErrorBanner,
 } from "./_shared.jsx";
 
 // ---- Catalogue ----
+// Note: protein shake lives in the Food tab's QUICK LOG (with macros) — not here.
 const SUPPS = [
-  { type: "protein",   label: "Protein shake", emoji: "🥤", group: "supps"    },
   { type: "vitamins",  label: "Vitamins",      emoji: "💊", group: "supps"    },
   { type: "omega3",    label: "Omega 3",       emoji: "🐟", group: "supps"    },
   { type: "collagen",  label: "Collagen",      emoji: "✨", group: "supps"    },
@@ -18,7 +18,6 @@ const SUPPS = [
 ];
 
 const TYPE_COLOR = {
-  protein:  "#16a34a",
   vitamins: "#7c3aed",
   omega3:   "#0891b2",
   collagen: "#be185d",
@@ -228,20 +227,15 @@ export default function Supps() {
         ]}
       />
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: "10px 12px",
-            borderRadius: "8px",
-            marginBottom: "16px",
-            fontSize: "13px",
-          }}
-        >
-          {error}
-        </div>
-      )}
+      <ErrorBanner
+        message={error}
+        onRetry={() => {
+          setError(null);
+          setLoading(true);
+          load();
+        }}
+      />
+
 
       {view === "log" && (
         <>
