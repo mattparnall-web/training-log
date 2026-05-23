@@ -235,14 +235,16 @@ export function dayDefFor(dateStr) {
 }
 
 // Map each day type to its nutrition target bucket.
+// Updated 2026-05-23: Thu (legs) and Sun (cardio) are the BIG-fuel days;
+// Mon, Tue and Sat are LIFTING; Wed + Fri are REST.
 const DAY_TYPE_TO_NUTRITION_BUCKET = {
-  recovery:   "rest",
-  flexible:   "rest",      // default — Friday is open; lean rest unless overridden
-  upper_push: "lifting",
-  upper_pull: "lifting",
-  lower_squat:"lifting",
-  olympic:    "big",
-  cardio:     "big",
+  recovery:   "rest",      // Wed
+  flexible:   "rest",      // Fri — open day, default to rest
+  upper_push: "lifting",   // Mon
+  upper_pull: "lifting",   // Tue
+  lower_squat:"big",       // Thu — legs needs more fuel
+  olympic:    "lifting",   // Sat
+  cardio:     "big",       // Sun
 };
 
 export const NUTRITION_BUCKETS = ["rest", "lifting", "big"];

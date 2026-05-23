@@ -1,8 +1,11 @@
 -- Coach Claude — Nutrition Targets per day-type bucket.
 -- Matt's nutrition strategy varies macros by training intensity:
 --   * Rest      — protein floor, lowest carbs (~240g), 65-80g fat, ~2200 cal
+--     Wed (recovery), Fri (flexible)
 --   * Lifting   — protein floor, mid carbs (~305g),    65-80g fat, ~2500-2650 cal
+--     Mon (upper push), Tue (upper pull), Sat (Olympic + MetCon)
 --   * Big       — protein floor, high carbs (~470g+),  65-80g fat, ~3200+ cal
+--     Thu (lower / squat), Sun (Zone 2 cardio)
 -- Protein is fixed across all days (150g floor); the lever is carbs (and total cal).
 --
 -- Stored as a single jsonb column on `settings` so we don't need to migrate

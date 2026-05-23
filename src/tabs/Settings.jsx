@@ -224,9 +224,9 @@ export default function Settings() {
         </div>
 
         {[
-          { key: "rest",    label: "REST DAY",            sub: "Wed (recovery), Fri (flexible)", color: "#16a34a" },
-          { key: "lifting", label: "LIFTING DAY",         sub: "Mon · Tue · Thu",                color: "#7c3aed" },
-          { key: "big",     label: "BIG TRAINING / RIDE", sub: "Sat (Olympic) · Sun (cardio)",   color: "#dc2626" },
+          { key: "rest",    label: "REST DAY",            sub: "Wed (recovery) · Fri (flexible)", color: "#16a34a" },
+          { key: "lifting", label: "LIFTING DAY",         sub: "Mon · Tue · Sat (Olympic)",       color: "#7c3aed" },
+          { key: "big",     label: "BIG TRAINING / RIDE", sub: "Thu (legs) · Sun (cardio)",       color: "#dc2626" },
         ].map((bucket) => (
           <div
             key={bucket.key}
