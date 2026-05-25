@@ -208,7 +208,9 @@ export default function CoachSessionImporter({ day, date, onImported, onCancel }
         position: "fixed",
         inset: 0,
         background: T.overlay,
-        zIndex: 200,
+        // The Workout logger panel uses zIndex 200; this modal must sit ABOVE
+        // it or it ends up hidden behind the logger (visible as a faint tint).
+        zIndex: 300,
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",

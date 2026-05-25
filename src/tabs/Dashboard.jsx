@@ -372,6 +372,19 @@ Notes examples:
 - "stop if knee twinges"
 - "" (when no note is needed)`;
 
+// System prompt used when the athlete asks for a revision after seeing the plan.
+// We feed the existing plan back in so the model can adjust rather than rebuild
+// from scratch — keeping continuity with what the athlete already saw.
+const COACH_REVISE_SYSTEM_PROMPT = `${COACH_SYSTEM_PROMPT}
+
+REVISION MODE
+You have already proposed a session for today (included below as PREVIOUS PLAN).
+The athlete has read it and given you feedback. Revise the plan in light of their
+feedback — keep what they didn't object to, change only what they flagged.
+Respond with the same JSON shape as before (summary + exercises). In the
+summary, briefly acknowledge the change you made (e.g. "Dropped bench to 70 kg
+because you said it's too heavy.").`;
+
 // ---- Parse Claude's response: JSON first, fall back to text headers ----
 function tryExtractJSON(text) {
   try { return JSON.parse(text); } catch {}
@@ -630,6 +643,82 @@ export default function Dashboard() {
     }
   };
 
+  // ---- Revise the existing plan based on athlete feedback ----
+  // Takes a free-text feedback string from the user, sends it back to Claude
+  // along with the existing plan, and replaces the saved plan with the revision.
+  const revisePlan = async (feedbackText) => {
+    if (!plan || !feedbackText?.trim()) return;
+    setCoachBusy(true);
+    setCoachError(null);
+    try {
+      const recentSessions = await fetchRecentSessions(10);
+      const yIntake = {
+        calories: yCalories,
+        protein_g: yProtein,
+        fat_g: yFat,
+        carbs_g: yCarbs,
+        drinks: alcoholYesterday.length,
+        units: round1(alcoholYesterday.reduce((a, e) => a + Number(e.units || 0), 0)),
+      };
+      const baseContext = buildCoachPrompt({
+        dateStr: selectedDate,
+        day,
+        settings,
+        garmin,
+        recentSessions,
+        yIntake,
+        todayTargets,
+        yesterdayTargets,
+        athleteNotes: notes,
+      });
+      const previousPlanJson = JSON.stringify(
+        { summary: plan.summary, exercises: plan.exercises },
+        null,
+        2
+      );
+      const userPrompt = `${baseContext}
+
+PREVIOUS PLAN (already shown to the athlete):
+${previousPlanJson}
+
+ATHLETE FEEDBACK ON THAT PLAN:
+"""
+${feedbackText.trim()}
+"""
+
+Revise the plan to address the feedback. Same JSON output format.`;
+      const replyText = await callClaudeText(COACH_REVISE_SYSTEM_PROMPT, userPrompt, 1400);
+      const parsed = parseCoachReply(replyText);
+
+      const row = {
+        date: selectedDate,
+        day_id: day.id,
+        day_name: day.name,
+        summary: parsed.summary,
+        plan_text: replyText,
+        model: COACH_MODEL,
+      };
+      // Upsert (merge-duplicates) so the existing plan row gets replaced.
+      await sb("/planned_sessions", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+        body: JSON.stringify(row),
+      });
+
+      setPlan({
+        summary: parsed.summary,
+        exercises: parsed.exercises,
+        sessionText: parsed.sessionText,
+        model: COACH_MODEL,
+        created_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      setCoachError(e.message);
+    } finally {
+      setCoachBusy(false);
+    }
+  };
+
   const clearPlan = async () => {
     try {
       await sb(`/planned_sessions?date=eq.${selectedDate}`, { method: "DELETE" });
@@ -760,7 +849,13 @@ export default function Dashboard() {
           {planLoading ? (
             <div style={{ fontSize: "13px", color: T.textSub }}>Checking for saved plan…</div>
           ) : plan ? (
-            <CoachPlanView plan={plan} onRegenerate={planSession} onClear={clearPlan} busy={coachBusy} />
+            <CoachPlanView
+              plan={plan}
+              onRegenerate={planSession}
+              onRevise={revisePlan}
+              onClear={clearPlan}
+              busy={coachBusy}
+            />
           ) : (
             <>
               <div
@@ -1001,7 +1096,21 @@ function Metric({ label, big, sub, tone }) {
   );
 }
 
-function CoachPlanView({ plan, onRegenerate, onClear, busy }) {
+function CoachPlanView({ plan, onRegenerate, onRevise, onClear, busy }) {
+  // Local state for the revise flow — typing in a feedback box without
+  // bouncing through the Dashboard's React tree.
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
+
+  const submitFeedback = async () => {
+    if (!feedbackText.trim() || busy) return;
+    await onRevise?.(feedbackText);
+    // Only clear the input on success — if onRevise threw, the parent will have
+    // surfaced an error and we want the user to see what they typed.
+    setFeedbackText("");
+    setShowFeedback(false);
+  };
+
   return (
     <div
       style={{
@@ -1136,7 +1245,109 @@ function CoachPlanView({ plan, onRegenerate, onClear, busy }) {
         </div>
       )}
 
+      {/* Revise feedback box — opens inline when the user taps REVISE */}
+      {showFeedback && (
+        <div
+          style={{
+            marginTop: "12px",
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid #334155",
+            borderRadius: "10px",
+            padding: "12px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "10px",
+              letterSpacing: "0.15em",
+              color: "#fb923c",
+              fontWeight: 700,
+              marginBottom: "6px",
+            }}
+          >
+            TELL THE COACH WHAT TO CHANGE
+          </div>
+          <textarea
+            value={feedbackText}
+            onChange={(e) => setFeedbackText(e.target.value)}
+            placeholder="e.g. Bench at 82 kg is too heavy today, drop it &mdash; or &mdash; you misread last week, my squat working set was 110 kg not 130 kg"
+            rows={3}
+            disabled={busy}
+            style={{
+              width: "100%",
+              background: "#0b1220",
+              border: "1px solid #1e293b",
+              borderRadius: "8px",
+              color: "#f1f5f9",
+              padding: "10px 12px",
+              fontSize: "13px",
+              fontFamily: "inherit",
+              resize: "vertical",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+          <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+            <button
+              onClick={() => { setShowFeedback(false); setFeedbackText(""); }}
+              disabled={busy}
+              style={{
+                background: "transparent",
+                border: "1px solid #475569",
+                color: "#94a3b8",
+                borderRadius: "8px",
+                padding: "8px 14px",
+                fontSize: "11px",
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                cursor: busy ? "wait" : "pointer",
+              }}
+            >
+              CANCEL
+            </button>
+            <button
+              onClick={submitFeedback}
+              disabled={!feedbackText.trim() || busy}
+              style={{
+                flex: 1,
+                background: feedbackText.trim() && !busy ? "#fb923c" : "#334155",
+                color: feedbackText.trim() && !busy ? "#0f172a" : "#64748b",
+                border: "none",
+                borderRadius: "8px",
+                padding: "8px 14px",
+                fontSize: "11px",
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                cursor: feedbackText.trim() && !busy ? "pointer" : "default",
+              }}
+            >
+              {busy ? "COACH IS REVISING…" : "↻ ASK COACH TO REVISE"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+        {!showFeedback && (
+          <button
+            onClick={() => setShowFeedback(true)}
+            disabled={busy}
+            style={{
+              flex: 1,
+              background: "#fb923c",
+              border: "none",
+              color: "#0f172a",
+              borderRadius: "8px",
+              padding: "8px",
+              fontSize: "11px",
+              fontWeight: 800,
+              letterSpacing: "0.08em",
+              cursor: busy ? "wait" : "pointer",
+            }}
+          >
+            ✏️ REVISE
+          </button>
+        )}
         <button
           onClick={onRegenerate}
           disabled={busy}
@@ -1153,7 +1364,7 @@ function CoachPlanView({ plan, onRegenerate, onClear, busy }) {
             cursor: busy ? "wait" : "pointer",
           }}
         >
-          {busy ? "REGENERATING…" : "🔄 REGENERATE"}
+          {busy ? "WORKING…" : "🔄 REGENERATE"}
         </button>
         <button
           onClick={onClear}

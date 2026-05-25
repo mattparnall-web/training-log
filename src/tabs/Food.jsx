@@ -53,7 +53,12 @@ Reply with ONLY a JSON object (no prose, no markdown fences) using exactly these
 
 Be realistic — these are estimates, not lab measurements. Use UK portion sizes by default. If you can't identify the food clearly, still give your best guess and set confidence to "low".`;
 
-function buildPhotoBody(base64) {
+// Build the Anthropic request for a photo. `caption` is optional extra context
+// the user typed alongside the picture (portion size, sides, brand, etc.).
+function buildPhotoBody(base64, caption) {
+  const textInstructions = caption?.trim()
+    ? `${NUTRITION_SCHEMA_INSTRUCTIONS}\n\nADDITIONAL CONTEXT FROM THE USER (treat as high-signal — they know what they ate):\n"""\n${caption.trim()}\n"""`
+    : NUTRITION_SCHEMA_INSTRUCTIONS;
   return {
     model: MODEL,
     max_tokens: 800,
@@ -65,7 +70,7 @@ function buildPhotoBody(base64) {
             type: "image",
             source: { type: "base64", media_type: "image/jpeg", data: base64 },
           },
-          { type: "text", text: NUTRITION_SCHEMA_INSTRUCTIONS },
+          { type: "text", text: textInstructions },
         ],
       },
     ],
@@ -150,6 +155,11 @@ export default function Food() {
   const [textInput, setTextInput] = useState("");
   const [showTextEntry, setShowTextEntry] = useState(false);
   const [quickLogBusy, setQuickLogBusy] = useState(null);
+  // Photo staging: holds the resized base64 + a preview data-url + the caption
+  // the user can optionally add before the Claude call. Null when no photo is
+  // staged. We do this so the photo and the caption can be sent together.
+  const [photoStaged, setPhotoStaged] = useState(null);
+  const [photoCaption, setPhotoCaption] = useState("");
   const fileInputRef = useRef(null);
 
   const isToday = selectedDate === todayString();
@@ -211,21 +221,49 @@ export default function Food() {
   const carbsTone = targets.carbs_g == null ? null : carbsPct < 80 ? T.amber : carbsPct < 110 ? T.ok : T.warn;
 
   // ---- Actions ----
+  // Photo selection NO LONGER calls Claude directly. We resize, then stage the
+  // photo + an optional caption box, so the user can add context like "the
+  // chicken was a 200g portion" before sending. The actual Claude call lives
+  // in submitStagedPhoto below.
   const onPhotoSelected = async (file) => {
     if (!file) return;
-    setBusyMode("photo");
+    setBusyMode("photo-prep");
     setError(null);
     try {
       const base64 = await resizeAndEncode(file);
-      const resp = await callClaude(buildPhotoBody(base64));
-      const text = extractAssistantText(resp);
-      const parsed = tryParseJSON(text);
-      setDraft({ source: "photo", ...normaliseParsed(parsed) });
+      setPhotoStaged({
+        base64,
+        previewUrl: `data:image/jpeg;base64,${base64}`,
+      });
+      setPhotoCaption("");
     } catch (e) {
       setError(e.message);
     } finally {
       setBusyMode(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const cancelStagedPhoto = () => {
+    setPhotoStaged(null);
+    setPhotoCaption("");
+  };
+
+  const submitStagedPhoto = async () => {
+    if (!photoStaged) return;
+    setBusyMode("photo");
+    setError(null);
+    try {
+      const resp = await callClaude(buildPhotoBody(photoStaged.base64, photoCaption));
+      const text = extractAssistantText(resp);
+      const parsed = tryParseJSON(text);
+      setDraft({ source: "photo", ...normaliseParsed(parsed) });
+      setPhotoStaged(null);
+      setPhotoCaption("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusyMode(null);
     }
   };
 
@@ -676,7 +714,7 @@ export default function Food() {
               </div>
             )}
 
-            {busyMode === "photo" && (
+            {busyMode === "photo-prep" && !photoStaged && (
               <div
                 style={{
                   marginTop: "12px",
@@ -688,7 +726,106 @@ export default function Food() {
                   borderRadius: "8px",
                 }}
               >
-                Analysing photo… Claude is estimating macros.
+                Preparing photo…
+              </div>
+            )}
+
+            {photoStaged && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  background: T.surface,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: "10px",
+                  padding: "12px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "12px",
+                    alignItems: "flex-start",
+                    marginBottom: "10px",
+                  }}
+                >
+                  <img
+                    src={photoStaged.previewUrl}
+                    alt="Selected meal"
+                    style={{
+                      width: "84px",
+                      height: "84px",
+                      objectFit: "cover",
+                      borderRadius: "8px",
+                      flexShrink: 0,
+                      border: `1px solid ${T.border}`,
+                    }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        letterSpacing: "0.15em",
+                        color: T.textMuted,
+                        fontWeight: 600,
+                        marginBottom: "6px",
+                      }}
+                    >
+                      ADD CONTEXT (OPTIONAL)
+                    </div>
+                    <textarea
+                      value={photoCaption}
+                      onChange={(e) => setPhotoCaption(e.target.value)}
+                      placeholder="e.g. roughly 200g chicken, half a bowl of rice, with butter"
+                      rows={3}
+                      disabled={busyMode === "photo"}
+                      style={{
+                        ...inputStyle,
+                        width: "100%",
+                        fontSize: "13px",
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={cancelStagedPhoto}
+                    disabled={busyMode === "photo"}
+                    style={{
+                      background: "transparent",
+                      border: `1px solid ${T.border2}`,
+                      color: T.textSub,
+                      borderRadius: "8px",
+                      padding: "10px 14px",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      letterSpacing: "0.05em",
+                      cursor: busyMode === "photo" ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    CANCEL
+                  </button>
+                  <button
+                    onClick={submitStagedPhoto}
+                    disabled={busyMode === "photo"}
+                    style={{
+                      flex: 1,
+                      background: busyMode === "photo" ? T.surface2 : T.accent,
+                      color: busyMode === "photo" ? T.textMuted : "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      padding: "10px 14px",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      letterSpacing: "0.05em",
+                      cursor: busyMode === "photo" ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {busyMode === "photo" ? "ANALYSING…" : "ESTIMATE MACROS"}
+                  </button>
+                </div>
               </div>
             )}
           </div>

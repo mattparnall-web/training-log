@@ -193,7 +193,7 @@ function WhiteboardImporter({ day, onImported, onCancel }) {
   function addSet(ei) { setParsed(p => ({ ...p, exercises: p.exercises.map((ex, idx) => idx === ei ? { ...ex, sets: [...ex.sets, { reps: "", weight: "" }] } : ex) })); }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: T.overlay, zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "20px", overflowY: "auto" }}>
+    <div style={{ position: "fixed", inset: 0, background: T.overlay, zIndex: 300, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "20px", overflowY: "auto" }}>
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: "16px", width: "100%", maxWidth: "520px", padding: "24px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}>
         <div style={{ marginBottom: "20px" }}>
           <div style={{ fontSize: "11px", color: "#0891b2", fontWeight: "700", letterSpacing: "0.1em", marginBottom: "4px" }}>WHITEBOARD SCAN</div>
