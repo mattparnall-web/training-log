@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import CoachSessionImporter from "./CoachSessionImporter.jsx";
+import SessionReviews from "./SessionReviews.jsx";
 
 // --- SUPABASE CONFIG ---
 const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
@@ -1371,13 +1372,13 @@ export default function WorkoutTracker() {
       ) : (
         <>
           <div style={{ display: "flex", gap: "6px", marginBottom: "24px" }}>
-            {[["log", "LOG SESSION"], ["history", "HISTORY"], ["calendar", "CALENDAR"]].map(([v, label]) => (
+            {[["log", "LOG"], ["history", "HISTORY"], ["calendar", "CALENDAR"], ["review", "REVIEW"]].map(([v, label]) => (
               <button key={v} onClick={() => setView(v)} style={{
                 flex: 1, background: view === v ? T.text : "none",
                 border: `1px solid ${view === v ? T.text : T.border}`,
                 color: view === v ? "#fff" : T.textSub,
-                borderRadius: "10px", padding: "10px", fontSize: "11px",
-                fontWeight: "700", cursor: "pointer", letterSpacing: "0.08em", fontFamily: "inherit"
+                borderRadius: "10px", padding: "10px 4px", fontSize: "11px",
+                fontWeight: "700", cursor: "pointer", letterSpacing: "0.06em", fontFamily: "inherit"
               }}>{label}</button>
             ))}
           </div>
@@ -1434,6 +1435,7 @@ export default function WorkoutTracker() {
 
           {view === "history" && <HistoryView sessions={sessions} onDelete={deleteSession} onEdit={editSession} />}
           {view === "calendar" && <CalendarView sessions={sessions} />}
+          {view === "review" && <SessionReviews />}
         </>
       )}
 

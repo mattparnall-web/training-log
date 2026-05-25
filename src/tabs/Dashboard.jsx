@@ -279,7 +279,7 @@ function summariseSession(s) {
 }
 
 // ---- Coach prompt ----
-function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, yIntake, todayTargets, yesterdayTargets, athleteNotes }) {
+function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, recentReviews, yIntake, todayTargets, yesterdayTargets, athleteNotes }) {
   const sleep = pickSleep(garmin?.sleep);
   const bb = pickBodyBattery(garmin?.body_battery);
   const hrv = pickHRV(garmin?.hrv);
@@ -294,7 +294,27 @@ function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, yInt
     ? recentSessions.map(summariseSession).join("\n  ")
     : "  (no recent sessions logged)";
 
-  return `DATE: ${dateStr}
+  // Programme-level context the athlete pasted from earlier coaching chats.
+  // We put this at the top so it anchors all downstream reasoning.
+  const programmeContextBlock = settings?.programme_context?.trim()
+    ? `ATHLETE'S PROGRAMME CONTEXT (long-form, set by the athlete — always honour this):
+"""
+${settings.programme_context.trim()}
+"""
+
+`
+    : "";
+
+  // Coach's own past post-session reviews — so this week's planning sees the
+  // notes Claude itself made on recent sessions, completing the feedback loop.
+  const reviewsBlock = recentReviews?.length
+    ? `RECENT COACH REVIEWS (your own notes from prior sessions — adapt this week's plan based on these):
+${recentReviews.map((r) => `  - ${r.date} ${r.day_name || ""}: ${r.summary || "(no summary)"}`).join("\n")}
+
+`
+    : "";
+
+  return `${programmeContextBlock}${reviewsBlock}DATE: ${dateStr}
 DAY OF WEEK: ${day.label} — programme says: ${day.name}
 
 KEY LIFT TARGETS (athlete's current 1-rep targets or working weights):
@@ -433,6 +453,18 @@ async function fetchRecentSessions(limit = 10) {
     const all = await r.json();
     // Endpoint returns date-sorted ascending; take the last N.
     return all.slice(-limit).reverse();
+  } catch {
+    return [];
+  }
+}
+
+// ---- Read recent post-session coach reviews (used to feed back into planning) ----
+async function fetchRecentReviews(limit = 5) {
+  try {
+    const rows = await sb(
+      `/session_reviews?select=session_id,date,day_name,summary,created_at&order=date.desc&limit=${limit}`
+    );
+    return rows || [];
   } catch {
     return [];
   }
@@ -590,7 +622,10 @@ export default function Dashboard() {
     setCoachBusy(true);
     setCoachError(null);
     try {
-      const recentSessions = await fetchRecentSessions(10);
+      const [recentSessions, recentReviews] = await Promise.all([
+        fetchRecentSessions(10),
+        fetchRecentReviews(5),
+      ]);
       const yIntake = {
         calories: yCalories,
         protein_g: yProtein,
@@ -605,6 +640,7 @@ export default function Dashboard() {
         settings,
         garmin,
         recentSessions,
+        recentReviews,
         yIntake,
         todayTargets,
         yesterdayTargets,
@@ -651,7 +687,10 @@ export default function Dashboard() {
     setCoachBusy(true);
     setCoachError(null);
     try {
-      const recentSessions = await fetchRecentSessions(10);
+      const [recentSessions, recentReviews] = await Promise.all([
+        fetchRecentSessions(10),
+        fetchRecentReviews(5),
+      ]);
       const yIntake = {
         calories: yCalories,
         protein_g: yProtein,
@@ -666,6 +705,7 @@ export default function Dashboard() {
         settings,
         garmin,
         recentSessions,
+        recentReviews,
         yIntake,
         todayTargets,
         yesterdayTargets,

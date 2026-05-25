@@ -60,6 +60,10 @@ export default function Settings() {
   const [proteinTarget, setProteinTarget] = useState("");
   const [alcoholTarget, setAlcoholTarget] = useState("");
   const [keyLifts, setKeyLifts] = useState([]);
+  // Long-form programme context that the coach reads on every plan/review.
+  // Matt pastes this from his previous Claude chats — goals, blocks, history,
+  // constraints, anything that should stay in the coach's awareness.
+  const [programmeContext, setProgrammeContext] = useState("");
 
   // Per-day-type macro targets: { rest: {...}, lifting: {...}, big: {...} }
   const [nutritionTargets, setNutritionTargets] = useState({
@@ -79,6 +83,7 @@ export default function Settings() {
           setProteinTarget(row.daily_protein_target_g ?? "");
           setAlcoholTarget(row.weekly_alcohol_units_target ?? "");
           setKeyLifts(Array.isArray(row.key_lifts) ? row.key_lifts : []);
+          setProgrammeContext(row.programme_context ?? "");
           const nt = row.nutrition_targets || {};
           setNutritionTargets({
             rest:    { calories: nt.rest?.calories    ?? "", protein_g: nt.rest?.protein_g    ?? "", fat_g: nt.rest?.fat_g    ?? "", carbs_g: nt.rest?.carbs_g    ?? "" },
@@ -130,6 +135,7 @@ export default function Settings() {
         daily_calorie_target: numOrNull(calTarget),
         daily_protein_target_g: numOrNull(proteinTarget),
         weekly_alcohol_units_target: numOrNull(alcoholTarget),
+        programme_context: programmeContext?.trim() ? programmeContext.trim() : null,
         key_lifts: keyLifts
           .filter((l) => l.name?.trim())
           .map((l) => ({
@@ -199,6 +205,7 @@ export default function Settings() {
                 setProteinTarget(row.daily_protein_target_g ?? "");
                 setAlcoholTarget(row.weekly_alcohol_units_target ?? "");
                 setKeyLifts(Array.isArray(row.key_lifts) ? row.key_lifts : []);
+                setProgrammeContext(row.programme_context ?? "");
                 const nt = row.nutrition_targets || {};
                 setNutritionTargets({
                   rest:    { calories: nt.rest?.calories    ?? "", protein_g: nt.rest?.protein_g    ?? "", fat_g: nt.rest?.fat_g    ?? "", carbs_g: nt.rest?.carbs_g    ?? "" },
@@ -296,6 +303,33 @@ export default function Settings() {
             placeholder="e.g. 180"
             style={inputStyle}
           />
+        </div>
+      </div>
+
+      {/* ---- Programme context (free-text that the coach reads on every call) ---- */}
+      <div style={sectionStyle}>
+        <div style={sectionHeader}>PROGRAMME CONTEXT FOR THE COACH</div>
+        <div style={{ ...labelStyle, marginBottom: "10px", textTransform: "none", letterSpacing: "0", fontSize: "12px", color: T.textSub, fontWeight: 500, lineHeight: 1.5 }}>
+          Paste anything you want Coach Claude to remember — programme strategy,
+          goals, training blocks, history, injury constraints, equipment notes.
+          Read on every plan, revision, and post-session review.
+        </div>
+        <textarea
+          value={programmeContext}
+          onChange={(e) => { setProgrammeContext(e.target.value); markDirty(); }}
+          placeholder="e.g. 12-week body-recomp block. 2RM Back Squat: 130kg. Coming back from a left-shoulder strain — avoid heavy overhead until week 6. Sat Olympic days focus on technique not load…"
+          rows={10}
+          style={{
+            ...inputStyle,
+            width: "100%",
+            fontSize: "14px",
+            lineHeight: 1.5,
+            resize: "vertical",
+            fontFamily: "inherit",
+          }}
+        />
+        <div style={{ fontSize: "11px", color: T.textMuted, marginTop: "6px" }}>
+          {programmeContext.length.toLocaleString()} characters
         </div>
       </div>
 
