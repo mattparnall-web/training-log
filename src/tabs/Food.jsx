@@ -9,7 +9,7 @@ import {
 
 // ---- Anthropic proxy (same one the whiteboard scanner uses) ----
 const PROXY_URL = "/api/proxy";
-const MODEL = "claude-sonnet-4-5";
+const MODEL = "claude-opus-4-6";
 const LOOKBACK_DAYS = 90;
 
 // ---- One-tap presets (frequent foods logged with a single tap) ----
