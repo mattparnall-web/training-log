@@ -198,9 +198,10 @@ export default function Food() {
     return t >= dayStartMs && t <= dayEndMs;
   });
 
-  // Day-aware targets — pull the right bucket for the selected date's day type.
-  const day = dayDefFor(selectedDate);
-  const targets = nutritionTargetsFor(settings, day.type);
+  // Day-aware targets — uses the active weekly schedule (user override or
+  // default) so changes in Settings flow through immediately.
+  const day = dayDefFor(selectedDate, settings);
+  const targets = nutritionTargetsFor(settings, selectedDate);
 
   const sum = (k) => dayEntries.reduce((a, e) => a + Number(e[k] || 0), 0);
   const dayCals = Math.round(sum("calories"));

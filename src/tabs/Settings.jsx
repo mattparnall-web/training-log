@@ -2,7 +2,18 @@ import { useState, useEffect } from "react";
 // Reuse the shared Supabase helper (with retry-on-network-failure) and the
 // shared ErrorBanner with a Retry button. Previously this file had its own
 // sb() copy, which meant Settings didn't benefit from the retry logic.
-import { sb, ErrorBanner } from "./_shared.jsx";
+import {
+  sb,
+  ErrorBanner,
+  WORKOUT_TYPES,
+  WORKOUT_TYPE_LABELS,
+  NUTRITION_BUCKETS,
+  NUTRITION_BUCKET_LABELS,
+  DEFAULT_WEEKLY_SCHEDULE,
+  weeklyScheduleFor,
+  colorForType,
+  bucketDefaultFor,
+} from "./_shared.jsx";
 
 // ----- design tokens (matches WorkoutTracker) -----
 const T = {
@@ -65,6 +76,11 @@ export default function Settings() {
   // constraints, anything that should stay in the coach's awareness.
   const [programmeContext, setProgrammeContext] = useState("");
 
+  // The user-editable weekly programme — 7 day defs (Mon..Sun). Each has a
+  // name, type, and bucket. Initialised from settings.weekly_schedule or the
+  // factory default if missing.
+  const [weeklySchedule, setWeeklySchedule] = useState(() => weeklyScheduleFor(null));
+
   // Per-day-type macro targets: { rest: {...}, lifting: {...}, big: {...} }
   const [nutritionTargets, setNutritionTargets] = useState({
     rest:    { calories: "", protein_g: "", fat_g: "", carbs_g: "" },
@@ -84,6 +100,7 @@ export default function Settings() {
           setAlcoholTarget(row.weekly_alcohol_units_target ?? "");
           setKeyLifts(Array.isArray(row.key_lifts) ? row.key_lifts : []);
           setProgrammeContext(row.programme_context ?? "");
+          setWeeklySchedule(weeklyScheduleFor(row));
           const nt = row.nutrition_targets || {};
           setNutritionTargets({
             rest:    { calories: nt.rest?.calories    ?? "", protein_g: nt.rest?.protein_g    ?? "", fat_g: nt.rest?.fat_g    ?? "", carbs_g: nt.rest?.carbs_g    ?? "" },
@@ -98,6 +115,27 @@ export default function Settings() {
       }
     })();
   }, []);
+
+  // Schedule editor helpers
+  const updateScheduleDay = (i, field, value) => {
+    setWeeklySchedule((prev) => {
+      const next = [...prev];
+      const updated = { ...next[i], [field]: value };
+      // When the user changes the workout type, refresh the derived color and
+      // suggest a sensible bucket if they haven't customised it explicitly.
+      if (field === "type") {
+        updated.color = colorForType(value);
+        // Don't overwrite a user-set bucket; only suggest if blank/unset.
+      }
+      next[i] = updated;
+      return next;
+    });
+    markDirty();
+  };
+  const restoreScheduleDefaults = () => {
+    setWeeklySchedule(weeklyScheduleFor(null));
+    markDirty();
+  };
 
   const updateMacroTarget = (bucket, macro, value) => {
     setNutritionTargets((prev) => ({
@@ -136,6 +174,13 @@ export default function Settings() {
         daily_protein_target_g: numOrNull(proteinTarget),
         weekly_alcohol_units_target: numOrNull(alcoholTarget),
         programme_context: programmeContext?.trim() ? programmeContext.trim() : null,
+        // Persist only the fields the user owns; id / label / color are
+        // derived from position + type and recomputed on read.
+        weekly_schedule: weeklySchedule.map((d) => ({
+          name: d.name,
+          type: d.type,
+          bucket: d.bucket,
+        })),
         key_lifts: keyLifts
           .filter((l) => l.name?.trim())
           .map((l) => ({
@@ -206,6 +251,7 @@ export default function Settings() {
                 setAlcoholTarget(row.weekly_alcohol_units_target ?? "");
                 setKeyLifts(Array.isArray(row.key_lifts) ? row.key_lifts : []);
                 setProgrammeContext(row.programme_context ?? "");
+                setWeeklySchedule(weeklyScheduleFor(row));
                 const nt = row.nutrition_targets || {};
                 setNutritionTargets({
                   rest:    { calories: nt.rest?.calories    ?? "", protein_g: nt.rest?.protein_g    ?? "", fat_g: nt.rest?.fat_g    ?? "", carbs_g: nt.rest?.carbs_g    ?? "" },
@@ -304,6 +350,114 @@ export default function Settings() {
             style={inputStyle}
           />
         </div>
+      </div>
+
+      {/* ---- Weekly programme editor ---- */}
+      <div style={sectionStyle}>
+        <div style={sectionHeader}>WEEKLY PROGRAMME</div>
+        <div style={{ ...labelStyle, marginBottom: "12px", textTransform: "none", letterSpacing: "0", fontSize: "12px", color: T.textSub, fontWeight: 500, lineHeight: 1.5 }}>
+          What you train on each day. Changing the workout type updates the
+          exercise templates in the logger; changing the macro bucket updates
+          the calorie + protein + fat + carb targets the Food tab uses.
+        </div>
+
+        {weeklySchedule.map((d, i) => (
+          <div
+            key={d.id}
+            style={{
+              background: T.surface2,
+              border: `1px solid ${T.border}`,
+              borderLeft: `4px solid ${d.color}`,
+              borderRadius: "10px",
+              padding: "10px 12px",
+              marginBottom: "8px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                marginBottom: "8px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 800,
+                  letterSpacing: "0.1em",
+                  color: d.color,
+                  width: "32px",
+                  flexShrink: 0,
+                }}
+              >
+                {d.label}
+              </div>
+              <input
+                type="text"
+                value={d.name || ""}
+                onChange={(e) => updateScheduleDay(i, "name", e.target.value)}
+                placeholder="Session name"
+                style={{ ...inputStyle, flex: 1, fontSize: "14px" }}
+              />
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "8px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "10px", letterSpacing: "0.08em", color: T.textMuted, fontWeight: 700, marginBottom: "4px" }}>
+                  TYPE
+                </div>
+                <select
+                  value={d.type}
+                  onChange={(e) => updateScheduleDay(i, "type", e.target.value)}
+                  style={{ ...inputStyle, fontSize: "13px", padding: "8px 10px", appearance: "auto" }}
+                >
+                  {WORKOUT_TYPES.map((w) => (
+                    <option key={w.type} value={w.type}>{w.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", letterSpacing: "0.08em", color: T.textMuted, fontWeight: 700, marginBottom: "4px" }}>
+                  MACROS
+                </div>
+                <select
+                  value={d.bucket}
+                  onChange={(e) => updateScheduleDay(i, "bucket", e.target.value)}
+                  style={{ ...inputStyle, fontSize: "13px", padding: "8px 10px", appearance: "auto" }}
+                >
+                  {NUTRITION_BUCKETS.map((b) => (
+                    <option key={b} value={b}>{NUTRITION_BUCKET_LABELS[b]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        <button
+          onClick={restoreScheduleDefaults}
+          style={{
+            marginTop: "4px",
+            width: "100%",
+            padding: "10px",
+            background: T.surface2,
+            border: `1px dashed ${T.border2}`,
+            color: T.textSub,
+            borderRadius: "8px",
+            cursor: "pointer",
+            fontSize: "12px",
+            fontWeight: 600,
+            fontFamily: "inherit",
+          }}
+        >
+          ↺ Restore default programme
+        </button>
       </div>
 
       {/* ---- Programme context (free-text that the coach reads on every call) ---- */}

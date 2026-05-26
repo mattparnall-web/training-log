@@ -4,7 +4,7 @@ import {
   todayString, shiftDate, startOfDayLocal, endOfDayLocal,
   prettyDate, dateStrOf,
   DateBar,
-  DAYS, dayDefFor, nutritionTargetsFor,
+  DAYS, dayDefFor, nutritionTargetsFor, weeklyScheduleFor,
 } from "./_shared.jsx";
 
 // localStorage key for per-date coach notes — survives reloads on this device.
@@ -305,6 +305,16 @@ ${settings.programme_context.trim()}
 `
     : "";
 
+  // Current weekly programme — pulled from settings.weekly_schedule (or the
+  // factory default if the athlete hasn't customised it). Including this in
+  // every prompt means the coach uses whatever the athlete configured today,
+  // not the hardcoded split that used to live in the system prompt.
+  const schedule = weeklyScheduleFor(settings);
+  const scheduleBlock = `WEEKLY PROGRAMME (the athlete's current 7-day split — use this, not any historical default):
+${schedule.map((d) => `  - ${d.label}: ${d.name}  (type: ${d.type}, macros: ${d.bucket})`).join("\n")}
+
+`;
+
   // Coach's own past post-session reviews — so this week's planning sees the
   // notes Claude itself made on recent sessions, completing the feedback loop.
   const reviewsBlock = recentReviews?.length
@@ -314,8 +324,8 @@ ${recentReviews.map((r) => `  - ${r.date} ${r.day_name || ""}: ${r.summary || "(
 `
     : "";
 
-  return `${programmeContextBlock}${reviewsBlock}DATE: ${dateStr}
-DAY OF WEEK: ${day.label} — programme says: ${day.name}
+  return `${programmeContextBlock}${scheduleBlock}${reviewsBlock}DATE: ${dateStr}
+DAY OF WEEK: ${day.label} — programme says: ${day.name} (type: ${day.type})
 
 KEY LIFT TARGETS (athlete's current 1-rep targets or working weights):
 ${keyLiftsText}
@@ -349,13 +359,9 @@ ATHLETE NOTES (free-text observations from the athlete — take these into accou
 ${athleteNotes?.trim() ? athleteNotes.trim() : "  (none today)"}`;
 }
 
-const COACH_SYSTEM_PROMPT = `You are an experienced strength & conditioning coach. The athlete is on a body-recomp protocol with a fixed weekly split:
-- Mon: Upper Push        - Tue: Upper Pull + Deadlifts
-- Wed: Active Recovery   - Thu: Lower — Squat
-- Fri: Flexible          - Sat: Olympic + MetCon
-- Sun: Zone 2 Cardio
+const COACH_SYSTEM_PROMPT = `You are an experienced strength & conditioning coach. The athlete follows a 7-day training split — the current week's programme is given to you in each user message under "WEEKLY PROGRAMME". Always honour the programme as configured by the athlete; do not assume the historical default.
 
-You will be given today's date, the athlete's recent training, last night's recovery data from Garmin, yesterday's nutrition + alcohol, the athlete's current target weights for their key lifts, and any free-text notes the athlete added.
+You will be given today's date, the current weekly programme, the athlete's recent training, last night's recovery data from Garmin, yesterday's nutrition + alcohol, the athlete's current target weights for their key lifts, and any free-text notes the athlete added.
 
 Your job: recommend TODAY'S SESSION, calibrated to recovery and recent load. Be specific and decisive.
 
@@ -543,7 +549,7 @@ export default function Dashboard() {
   };
 
   const isToday = selectedDate === todayString();
-  const day = dayDefFor(selectedDate);
+  const day = dayDefFor(selectedDate, settings);
 
   // ---- Garmin morning brief (with timeout + retry-friendly) ----
   // 40s timeout: cold-start (Python init ~3s) + 6 sequential Garmin calls
@@ -820,9 +826,9 @@ Revise the plan to address the feedback. Same JSON output format.`;
 
   // Use day-aware targets — yesterday's targets are based on yesterday's day type;
   // today's targets are based on today's day type (for the coach prompt).
-  const yesterdayDay = dayDefFor(yesterdayStr);
-  const yesterdayTargets = nutritionTargetsFor(settings, yesterdayDay.type);
-  const todayTargets = nutritionTargetsFor(settings, day.type);
+  const yesterdayDay = dayDefFor(yesterdayStr, settings);
+  const yesterdayTargets = nutritionTargetsFor(settings, yesterdayStr);
+  const todayTargets = nutritionTargetsFor(settings, selectedDate);
 
   const calTarget = yesterdayTargets.calories;
   const proteinTarget = yesterdayTargets.protein_g;

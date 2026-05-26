@@ -216,36 +216,87 @@ export function timeOf(iso) {
 }
 
 // ---------- Weekly programme + day-type → nutrition bucket ----------
-// Mirror of WorkoutTracker's DAYS so tabs that need to know "what day is this"
-// can do so without importing the workout file.
-export const DAYS = [
-  { id: "monday",    label: "MON", name: "Upper Push",          type: "upper_push",  color: "#7c3aed" },
-  { id: "tuesday",   label: "TUE", name: "Upper Pull + Deads",  type: "upper_pull",  color: "#0891b2" },
-  { id: "wednesday", label: "WED", name: "Active Recovery",     type: "recovery",    color: "#16a34a" },
-  { id: "thursday",  label: "THU", name: "Lower — Squat",       type: "lower_squat", color: "#2563eb" },
-  { id: "friday",    label: "FRI", name: "Flexible",            type: "flexible",    color: "#94a3b8" },
-  { id: "saturday",  label: "SAT", name: "Olympic + MetCon",    type: "olympic",     color: "#dc2626" },
-  { id: "sunday",    label: "SUN", name: "Zone 2 Cardio",       type: "cardio",      color: "#16a34a" },
+//
+// The weekly programme used to be a hardcoded constant duplicated across
+// WorkoutTracker.jsx and this file. It's now user-editable in Settings and
+// persisted to `settings.weekly_schedule` (JSONB array of 7 day defs,
+// Mon..Sun). The constants below are the FALLBACK used when no override is
+// saved.
+
+// Catalogue of workout types (drives exercise templates + nutrition bucket).
+// Add new types here when extending. `bucketDefault` is the macro bucket the
+// type defaults to when the user hasn't explicitly chosen one.
+export const WORKOUT_TYPES = [
+  { type: "upper_push",  label: "Upper Push",       color: "#7c3aed", bucketDefault: "lifting" },
+  { type: "upper_pull",  label: "Upper Pull",       color: "#0891b2", bucketDefault: "lifting" },
+  { type: "lower_squat", label: "Lower (Squat)",    color: "#2563eb", bucketDefault: "big"     },
+  { type: "recovery",    label: "Active Recovery",  color: "#16a34a", bucketDefault: "rest"    },
+  { type: "flexible",    label: "Flexible / Open",  color: "#94a3b8", bucketDefault: "rest"    },
+  { type: "olympic",     label: "Olympic / MetCon", color: "#dc2626", bucketDefault: "lifting" },
+  { type: "cardio",      label: "Zone 2 Cardio",    color: "#16a34a", bucketDefault: "big"     },
 ];
 
-export function dayDefFor(dateStr) {
-  const dt = startOfDayLocal(dateStr);
-  const idx = (dt.getDay() + 6) % 7; // Monday = 0
-  return DAYS[idx];
+export const WORKOUT_TYPE_LABELS = Object.fromEntries(
+  WORKOUT_TYPES.map((w) => [w.type, w.label])
+);
+
+export function colorForType(type) {
+  return WORKOUT_TYPES.find((w) => w.type === type)?.color || "#94a3b8";
 }
 
-// Map each day type to its nutrition target bucket.
-// Updated 2026-05-23: Thu (legs) and Sun (cardio) are the BIG-fuel days;
-// Mon, Tue and Sat are LIFTING; Wed + Fri are REST.
-const DAY_TYPE_TO_NUTRITION_BUCKET = {
-  recovery:   "rest",      // Wed
-  flexible:   "rest",      // Fri — open day, default to rest
-  upper_push: "lifting",   // Mon
-  upper_pull: "lifting",   // Tue
-  lower_squat:"big",       // Thu — legs needs more fuel
-  olympic:    "lifting",   // Sat
-  cardio:     "big",       // Sun
-};
+export function bucketDefaultFor(type) {
+  return WORKOUT_TYPES.find((w) => w.type === type)?.bucketDefault || "lifting";
+}
+
+// Default schedule — used when settings.weekly_schedule is null. This is the
+// canonical "factory" programme.
+export const DEFAULT_WEEKLY_SCHEDULE = [
+  { id: "monday",    label: "MON", name: "Upper Push",          type: "upper_push",  bucket: "lifting" },
+  { id: "tuesday",   label: "TUE", name: "Upper Pull + Deads",  type: "upper_pull",  bucket: "lifting" },
+  { id: "wednesday", label: "WED", name: "Active Recovery",     type: "recovery",    bucket: "rest"    },
+  { id: "thursday",  label: "THU", name: "Lower — Squat",       type: "lower_squat", bucket: "big"     },
+  { id: "friday",    label: "FRI", name: "Flexible",            type: "flexible",    bucket: "rest"    },
+  { id: "saturday",  label: "SAT", name: "Olympic + MetCon",    type: "olympic",     bucket: "lifting" },
+  { id: "sunday",    label: "SUN", name: "Zone 2 Cardio",       type: "cardio",      bucket: "big"     },
+];
+
+// Day order is fixed Mon..Sun; the user only edits name/type/bucket per day.
+const DAY_IDS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const DAY_LABELS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+
+// Resolve the active weekly schedule from settings, with graceful fallback.
+// Always returns an array of 7 day defs decorated with id, label, color.
+export function weeklyScheduleFor(settings) {
+  const override = settings?.weekly_schedule;
+  if (!Array.isArray(override) || override.length !== 7) {
+    return DEFAULT_WEEKLY_SCHEDULE.map((d) => ({ ...d, color: colorForType(d.type) }));
+  }
+  return override.map((d, i) => {
+    const type = d?.type || DEFAULT_WEEKLY_SCHEDULE[i].type;
+    return {
+      id: DAY_IDS[i],
+      label: DAY_LABELS[i],
+      name: d?.name || DEFAULT_WEEKLY_SCHEDULE[i].name,
+      type,
+      bucket: d?.bucket || bucketDefaultFor(type),
+      color: colorForType(type),
+    };
+  });
+}
+
+// Back-compat export: the legacy `DAYS` constant. Code that imports DAYS
+// without settings still gets the factory schedule. New code should call
+// `weeklyScheduleFor(settings)` instead.
+export const DAYS = DEFAULT_WEEKLY_SCHEDULE.map((d) => ({ ...d, color: colorForType(d.type) }));
+
+// Resolve the day def for a given date string. Accepts an optional `settings`
+// arg so the active (user-edited) schedule is used when available.
+export function dayDefFor(dateStr, settings) {
+  const schedule = weeklyScheduleFor(settings);
+  const dt = startOfDayLocal(dateStr);
+  const idx = (dt.getDay() + 6) % 7; // Monday = 0
+  return schedule[idx];
+}
 
 export const NUTRITION_BUCKETS = ["rest", "lifting", "big"];
 
@@ -255,15 +306,31 @@ export const NUTRITION_BUCKET_LABELS = {
   big:     "BIG TRAINING / RIDE",
 };
 
-export function nutritionBucketFor(dayType) {
-  return DAY_TYPE_TO_NUTRITION_BUCKET[dayType] || "lifting";
+// Resolve the nutrition bucket for a given date. Uses the per-day bucket from
+// the active schedule (settings override → default schedule). The dayType arg
+// is accepted for legacy callers but ignored when settings is provided.
+export function nutritionBucketFor(dayTypeOrDate, settings) {
+  // If caller passed a date string AND settings, use the active schedule.
+  if (typeof dayTypeOrDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dayTypeOrDate) && settings) {
+    return dayDefFor(dayTypeOrDate, settings).bucket;
+  }
+  // Legacy: dayType-based fallback.
+  return bucketDefaultFor(dayTypeOrDate);
 }
 
 // Resolve the macro targets for a given date, falling back gracefully.
 // Returns { calories, protein_g, fat_g, carbs_g, bucket }.
-export function nutritionTargetsFor(settings, dayType) {
+//
+// NOTE: signature changed to accept either (settings, dayType) — legacy —
+// or (settings, dateStr) when callers can pass the date for per-day bucket
+// resolution. Behaviour: if 2nd arg looks like a date string, we resolve the
+// bucket via the schedule; otherwise we fall back to the type→bucket default.
+export function nutritionTargetsFor(settings, dayTypeOrDate) {
   const targets = settings?.nutrition_targets || {};
-  const bucket = nutritionBucketFor(dayType);
+  const isDate = typeof dayTypeOrDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dayTypeOrDate);
+  const bucket = isDate
+    ? dayDefFor(dayTypeOrDate, settings).bucket
+    : bucketDefaultFor(dayTypeOrDate);
   const b = targets[bucket] || {};
   return {
     calories: numericOrNull(b.calories) ?? numericOrNull(settings?.daily_calorie_target),

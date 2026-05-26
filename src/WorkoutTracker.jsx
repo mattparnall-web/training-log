@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import CoachSessionImporter from "./CoachSessionImporter.jsx";
 import SessionReviews from "./SessionReviews.jsx";
+// Pull the active weekly schedule from settings so renames/type changes
+// from the Settings tab flow through to the logger and pickers.
+import { sb, DAYS as DEFAULT_DAYS, weeklyScheduleFor } from "./tabs/_shared.jsx";
 
 // --- SUPABASE CONFIG ---
 const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
@@ -75,15 +78,12 @@ async function cloudUpdate(session) {
 }
 
 // --- DATA CONSTANTS ---
-const DAYS = [
-  { id: "monday", label: "MON", name: "Upper Push", type: "upper_push", color: "#7c3aed" },
-  { id: "tuesday", label: "TUE", name: "Upper Pull + Deadlifts", type: "upper_pull", color: "#0891b2" },
-  { id: "wednesday", label: "WED", name: "Active Recovery", type: "recovery", color: "#16a34a" },
-  { id: "thursday", label: "THU", name: "Lower — Squat", type: "lower_squat", color: "#2563eb" },
-  { id: "friday", label: "FRI", name: "Flexible", type: "flexible", color: "#94a3b8" },
-  { id: "saturday", label: "SAT", name: "Olympic Lifts + MetCon", type: "olympic", color: "#dc2626" },
-  { id: "sunday", label: "SUN", name: "Zone 2 Cardio", type: "cardio", color: "#16a34a" },
-];
+// Module-level fallback used by sub-components that aren't passed a live
+// schedule. The top-level WorkoutTracker overrides this with the user's
+// edited schedule (from settings.weekly_schedule) for the day picker and
+// today-highlight. Sub-components looking up by stable day_id still get a
+// correct day def from the default.
+const DAYS = DEFAULT_DAYS;
 
 const EXERCISE_TEMPLATES = {
   upper_push: ["BB Bench Press", "Incline DB Press", "Overhead DB Press", "Push-ups", "Ring Push-ups", "Paralette Push-ups", "Dips", "Ring Dips", "Tricep Extension", "Lateral Raise", "Arnold Press", "Close-grip Press", "Chest Fly"],
@@ -1280,6 +1280,11 @@ export default function WorkoutTracker() {
   const [activeDay, setActiveDay] = useState(null);
   const [syncStatus, setSyncStatus] = useState("loading"); // loading | synced | error
   const [loadError, setLoadError] = useState(null);
+  // The user's edited weekly schedule (or the default if not set). We resolve
+  // it via the same helper the rest of the app uses, so renames/type changes
+  // in Settings propagate here without a page reload.
+  const [settings, setSettings] = useState(null);
+  const days = weeklyScheduleFor(settings);
 
   // Load from Supabase on mount
   useEffect(() => {
@@ -1290,6 +1295,9 @@ export default function WorkoutTracker() {
       setLoadError(err.message);
       setSyncStatus("error");
     });
+    sb("/settings?select=weekly_schedule&id=eq.1")
+      .then((rows) => setSettings(rows?.[0] || null))
+      .catch(() => {}); // non-fatal — falls back to DEFAULT_WEEKLY_SCHEDULE
   }, []);
 
   async function addSession(s) {
@@ -1328,7 +1336,7 @@ export default function WorkoutTracker() {
     }
   }
 
-  const todayDay = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+  const todayDay = days[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
 
   const syncLabel = { loading: "Loading…", saving: "Saving…", synced: "Synced ✓", error: "Sync error" }[syncStatus];
   const syncColor = { loading: T.textMuted, saving: "#0891b2", synced: "#16a34a", error: "#dc2626" }[syncStatus];
@@ -1387,7 +1395,7 @@ export default function WorkoutTracker() {
             <>
               <div style={{ fontSize: "11px", color: T.textMuted, fontWeight: "700", letterSpacing: "0.12em", marginBottom: "12px" }}>SELECT DAY TO LOG</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px", marginBottom: "24px" }}>
-                {DAYS.map(day => {
+                {days.map(day => {
                   const isToday = day.id === todayDay.id;
                   const count = sessions.filter(s => s.dayId === day.id).length;
                   return (
@@ -1403,7 +1411,7 @@ export default function WorkoutTracker() {
                 })}
               </div>
               <div style={{ display: "grid", gap: "10px" }}>
-                {DAYS.map(day => {
+                {days.map(day => {
                   const daySessions = sessions.filter(s => s.dayId === day.id);
                   const last = daySessions[daySessions.length - 1];
                   const isToday = day.id === todayDay.id;
