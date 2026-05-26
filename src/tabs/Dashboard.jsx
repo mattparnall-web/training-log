@@ -374,18 +374,32 @@ OUTPUT FORMAT — respond ONLY with a JSON object. No preamble, no markdown fenc
   "exercises": [
     {
       "name": "Exercise name",
-      "prescription": "sets × reps @ weight, OR a duration, OR descriptive text",
+      "prescription": "Human-readable summary (e.g. '5×5 @ 100 kg', or '5 ramp: 70×5, 90×3, 100×2, 115×5, 115×3', or '20 min Zone 2')",
+      "sets": [
+        { "reps": 5, "weight_kg": 70 },
+        { "reps": 3, "weight_kg": 90 }
+      ],
       "note": "optional brief inline note, or empty string"
     }
   ]
 }
 
-Prescription examples:
-- "4 × 6 @ 82 kg"
-- "3 × 8 (bodyweight + 5 kg)"
-- "20–30 min @ Zone 2 (~60–70% max HR)"
-- "5 min foam roll"
-- "3 sets to RPE 8"
+CRITICAL — the "sets" array:
+- REQUIRED for strength exercises (deadlift, squat, press, row, pull-ups, anything you'd log as reps × weight).
+- One object per set the athlete should perform — explode warm-up ramps and back-off sets into individual entries.
+- "reps" is the number of repetitions (integer).
+- "weight_kg" is the weight in kilograms (number). Use null for true bodyweight. For weighted bodyweight movements (e.g. weighted pull-ups), put the ADDED weight here.
+- Set "sets" to null (or omit it) for cardio, mobility, time-based, or descriptive exercises (Zone 2 cardio, foam rolling, ring holds, etc.). The "prescription" string covers those.
+
+Prescription examples + matching sets arrays:
+- "4 × 6 @ 82 kg"            → sets: [{reps:6,weight_kg:82},{reps:6,weight_kg:82},{reps:6,weight_kg:82},{reps:6,weight_kg:82}]
+- "Ramp 70×5, 90×3, 100×2, 115×5, 115×3"
+                             → sets: [{reps:5,weight_kg:70},{reps:3,weight_kg:90},{reps:2,weight_kg:100},{reps:5,weight_kg:115},{reps:3,weight_kg:115}]
+- "3 × 8 weighted pull-ups @ +5 kg"
+                             → sets: [{reps:8,weight_kg:5},{reps:8,weight_kg:5},{reps:8,weight_kg:5}]
+- "5 × 5 bodyweight push-ups" → sets: [{reps:5,weight_kg:null},{reps:5,weight_kg:null},{reps:5,weight_kg:null},{reps:5,weight_kg:null},{reps:5,weight_kg:null}]
+- "20–30 min @ Zone 2"        → sets: null
+- "5 min foam roll"           → sets: null
 
 Notes examples:
 - "deload from last week's PR — focus on bar speed"
@@ -404,6 +418,14 @@ feedback — keep what they didn't object to, change only what they flagged.
 Respond with the same JSON shape as before (summary + exercises). In the
 summary, briefly acknowledge the change you made (e.g. "Dropped bench to 70 kg
 because you said it's too heavy.").`;
+
+// Coerce a value to a finite number, or null if not parseable. Used when
+// reading the model's `sets` array (reps / weight_kg may come as strings).
+function numOrNull(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 // ---- Parse Claude's response: JSON first, fall back to text headers ----
 function tryExtractJSON(text) {
@@ -428,6 +450,15 @@ function parseCoachReply(text) {
       exercises: json.exercises.map((ex) => ({
         name: String(ex.name ?? "").trim(),
         prescription: String(ex.prescription ?? "").trim(),
+        // Preserve the structured sets array if the model provided one.
+        // The importer reads this directly so we don't have to parse the
+        // prescription text and guess at notation (reps × weight vs sets × reps).
+        sets: Array.isArray(ex.sets)
+          ? ex.sets.map((s) => ({
+              reps: numOrNull(s?.reps),
+              weight_kg: numOrNull(s?.weight_kg),
+            }))
+          : null,
         note: String(ex.note ?? "").trim(),
       })),
       sessionText: null,

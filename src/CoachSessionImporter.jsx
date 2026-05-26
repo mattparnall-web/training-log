@@ -54,13 +54,33 @@ function tryExtractJSON(text) {
   return null;
 }
 
-// ---- Turn a prescription string like "4 × 6 @ 82 kg" into editable sets ----
+// ---- Turn a prescription string into editable sets (fallback) ------------
+// Used only when the coach didn't provide a structured `sets` array on the
+// exercise (legacy plans, or descriptive prescriptions). Improvements over
+// the previous version:
+//   * Handles comma-separated multi-set ramps like "5 × 70, 3 × 90, 2 × 100"
+//     and treats them as multiple sets (NOT a single "5 sets of 70 reps").
+//   * Uses heuristics to tell reps × weight from sets × reps when the format
+//     is ambiguous (mainly: numbers > 30 are almost certainly weights).
+//   * Recognises explicit "kg" units when present.
 function parsePrescription(text) {
   if (!text) return { sets: [{ reps: "", weight: "" }], unclear: true };
 
   const txt = String(text);
 
-  // "N × R @ W kg" (with various separators + range support)
+  // 1. Multi-set comma list: "REPS × WEIGHT(kg)?, REPS × WEIGHT(kg)?, ..."
+  //    Each chunk becomes one set.
+  if (txt.includes(",")) {
+    const chunks = txt.split(",").map((c) => c.trim()).filter(Boolean);
+    const parsed = chunks
+      .map((c) => parseSingleSetChunk(c))
+      .filter((s) => s !== null);
+    if (parsed.length >= 2) {
+      return { sets: parsed, unclear: false };
+    }
+  }
+
+  // 2. "N × R @ W kg" — explicit sets × reps @ weight (the original syntax).
   let m = txt.match(/(\d+)\s*[×x*]\s*(\d+(?:[-–]\d+)?)\s*@\s*([\d.]+)\s*kg/i);
   if (m) {
     const nSets = Math.min(20, Math.max(1, parseInt(m[1], 10)));
@@ -72,18 +92,30 @@ function parsePrescription(text) {
     };
   }
 
-  // "N × R" (no weight — bodyweight, ring, etc.)
-  m = txt.match(/(\d+)\s*[×x*]\s*(\d+(?:[-–]\d+)?)/);
+  // 3. Bare "A × B" with no "@ kg". Could be:
+  //      reps × weight ("5 × 70" → 5 reps at 70 kg) — common in ramp notation
+  //      sets × reps ("5 × 5" → 5 sets of 5)
+  //    Heuristic: if B > 30 or "kg" is explicit, treat B as weight. Otherwise
+  //    treat as sets × reps.
+  m = txt.match(/(\d+)\s*[×x*]\s*([\d.]+(?:[-–][\d.]+)?)\s*(kg)?/i);
   if (m) {
-    const nSets = Math.min(20, Math.max(1, parseInt(m[1], 10)));
-    const reps = m[2].split(/[-–]/)[0];
+    const a = parseFloat(m[1]);
+    const bFirst = m[2].split(/[-–]/)[0];
+    const b = parseFloat(bFirst);
+    const hasKg = !!m[3];
+    if (hasKg || b > 30) {
+      // reps × weight — produce a single set.
+      return { sets: [{ reps: String(a), weight: String(b) }], unclear: false };
+    }
+    // sets × reps
+    const nSets = Math.min(20, Math.max(1, Math.round(a)));
     return {
-      sets: Array.from({ length: nSets }, () => ({ reps, weight: "" })),
+      sets: Array.from({ length: nSets }, () => ({ reps: bFirst, weight: "" })),
       unclear: false,
     };
   }
 
-  // "N sets / N rounds"
+  // 4. "N sets / N rounds"
   m = txt.match(/(\d+)\s+(?:sets?|rounds?)/i);
   if (m) {
     const nSets = Math.min(20, Math.max(1, parseInt(m[1], 10)));
@@ -93,8 +125,23 @@ function parsePrescription(text) {
     };
   }
 
-  // Descriptive (cardio, mobility, time-based) — single placeholder row, marked unclear.
+  // 5. Descriptive (cardio, mobility, time-based) — single placeholder row.
   return { sets: [{ reps: "", weight: "" }], unclear: true };
+}
+
+// Parse a single "5 × 70" or "5 × 10 kg" chunk into one set.
+// Returns null if the chunk doesn't match the expected shape.
+//
+// Within a comma-separated list, context strongly implies the chunks are
+// individual set prescriptions (REPS × WEIGHT), not a sets × reps spec —
+// nobody writes "5 sets × 5 reps, 3 sets × 5 reps, ...". So we always treat
+// the second number as the weight here.
+function parseSingleSetChunk(chunk) {
+  const m = chunk.match(/(\d+)\s*[×x*]\s*([\d.]+)\s*(kg)?/i);
+  if (!m) return null;
+  const reps = parseInt(m[1], 10);
+  const weight = parseFloat(m[2]);
+  return { reps: String(reps), weight: String(weight) };
 }
 
 function planToReviewExercises(planRow) {
@@ -103,13 +150,29 @@ function planToReviewExercises(planRow) {
   if (!json || !Array.isArray(json.exercises)) return null;
 
   return json.exercises.map((ex) => {
-    const parsed = parsePrescription(ex.prescription || "");
+    // Prefer the model's structured sets array if present — no parsing guesswork.
+    // Fall back to parsing the prescription string for legacy plans saved
+    // before the schema was extended.
+    let sets;
+    let unclear;
+    if (Array.isArray(ex.sets) && ex.sets.length > 0) {
+      sets = ex.sets.map((s) => ({
+        // Render in the input fields as strings (the inputs expect strings).
+        reps: s?.reps != null && s.reps !== "" ? String(s.reps) : "",
+        weight: s?.weight_kg != null && s.weight_kg !== "" ? String(s.weight_kg) : "",
+      }));
+      unclear = false;
+    } else {
+      const parsed = parsePrescription(ex.prescription || "");
+      sets = parsed.sets;
+      unclear = parsed.unclear;
+    }
     return {
       name: ex.name || "Exercise",
       prescription: ex.prescription || "",
       note: ex.note || "",
-      sets: parsed.sets,
-      unclear: parsed.unclear,
+      sets,
+      unclear,
     };
   });
 }
