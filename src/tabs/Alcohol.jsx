@@ -361,6 +361,45 @@ export default function Alcohol() {
         <CalendarMonthView
           entries={entries}
           dotColorOf={(e) => TYPE_COLOR[e.drink_type] || T.accent}
+          // Mark alcohol-free past days in green. We restrict the range to
+          // [first ever entry, today] so we don't paint every day since 1970.
+          // If there are no entries at all, we have no signal yet and skip.
+          dayBackgroundOf={(dayEntries, ds) => {
+            if (dayEntries.length > 0) return null;
+            if (entries.length === 0) return null;
+            const todayStr = todayString();
+            // entries are sorted desc by consumed_at; the last is the earliest.
+            const earliest = dateStrOf(entries[entries.length - 1].consumed_at);
+            if (ds < earliest || ds > todayStr) return null;
+            return "#bbf7d0"; // light green
+          }}
+          // For each green (alcohol-free) day, stamp the literal "WEAK TO STRONG"
+          // label across the cell. Stacked across three short lines so it fits
+          // a calendar square on mobile.
+          dayInnerOverlay={(dayEntries, ds) => {
+            if (dayEntries.length > 0) return null;
+            if (entries.length === 0) return null;
+            const todayStr = todayString();
+            const earliest = dateStrOf(entries[entries.length - 1].consumed_at);
+            if (ds < earliest || ds > todayStr) return null;
+            return (
+              <div
+                style={{
+                  fontSize: "6px",
+                  fontWeight: 800,
+                  letterSpacing: "0.05em",
+                  color: "#14532d",
+                  lineHeight: 1.1,
+                  textAlign: "center",
+                  textTransform: "uppercase",
+                }}
+              >
+                <div>weak</div>
+                <div>to</div>
+                <div>strong</div>
+              </div>
+            );
+          }}
           onSelectDay={(ds) => {
             setSelectedDate(ds);
             setView("log");

@@ -310,6 +310,19 @@ export default function Supps() {
         <CalendarMonthView
           entries={entries}
           dotColorOf={(e) => TYPE_COLOR[e.supp_type] || T.accent}
+          // Shade days by recovery activity so the user can spot sauna/ice-bath
+          // days at a glance without consulting the legend.
+          dayBackgroundOf={(dayEntries) => {
+            const hasSauna = dayEntries.some((e) => e.supp_type === "sauna");
+            const hasIce = dayEntries.some((e) => e.supp_type === "ice_bath");
+            if (hasSauna && hasIce) {
+              // Diagonal gradient — half red (sauna), half blue (ice bath).
+              return "linear-gradient(135deg, #fecaca 0%, #fecaca 48%, #bfdbfe 52%, #bfdbfe 100%)";
+            }
+            if (hasSauna) return "#fecaca"; // light red
+            if (hasIce) return "#bfdbfe";   // light blue
+            return null;
+          }}
           onSelectDay={(ds) => {
             setSelectedDate(ds);
             setView("log");

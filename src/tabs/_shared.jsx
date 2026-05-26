@@ -424,11 +424,18 @@ export function HistoryView({ entries, renderEntry, emptyText = "Nothing logged 
 // ---------- Calendar month view ----------
 // `dotColorOf(entry)` returns the colour for a dot representing this entry.
 // `onSelectDay(dateStr)` is called when user taps a day that has entries.
+// `dayBackgroundOf(dayEntries, dateStr)` (optional) returns a CSS background
+//   override per day — colour, gradient, etc. Use to highlight days by content
+//   (e.g. sauna days red, ice-bath days blue) or by absence (alcohol-free).
+// `dayInnerOverlay(dayEntries, dateStr)` (optional) returns a ReactNode shown
+//   inside the cell (in place of the dot row when there are no entries).
 export function CalendarMonthView({
   entries,
   dotColorOf,
   onSelectDay,
   renderDayDetail, // (entries) => ReactNode shown beneath when a day is selected
+  dayBackgroundOf,
+  dayInnerOverlay,
 }) {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(
@@ -553,6 +560,17 @@ export function CalendarMonthView({
           const dots = dayEntries.slice(0, 5).map(dotColorOf);
           const more = dayEntries.length > 5;
 
+          // Tab-specific background override (e.g. sauna red, ice-bath blue,
+          // alcohol-free green). Returned value can be a colour or gradient.
+          // Selected/today states still win — those are clear UI signals we
+          // shouldn't drown out.
+          const customBg = dayBackgroundOf ? dayBackgroundOf(dayEntries, ds) : null;
+          // Tab-specific inner content shown when there are no entries (used
+          // by the Alcohol tab to label alcohol-free days "WEAK TO STRONG").
+          const overlay = dayInnerOverlay ? dayInnerOverlay(dayEntries, ds) : null;
+
+          const defaultBg = dayEntries.length > 0 ? T.surface : isFuture ? T.bg : T.surface2;
+
           return (
             <div
               key={i}
@@ -565,11 +583,7 @@ export function CalendarMonthView({
                   ? "#0f172a"
                   : isToday
                   ? "#1e293b"
-                  : dayEntries.length > 0
-                  ? T.surface
-                  : isFuture
-                  ? T.bg
-                  : T.surface2,
+                  : customBg || defaultBg,
                 border: `1px solid ${
                   isSelected
                     ? "#0f172a"
@@ -605,7 +619,7 @@ export function CalendarMonthView({
               >
                 {day}
               </div>
-              {dayEntries.length > 0 && (
+              {dayEntries.length > 0 ? (
                 <div
                   style={{
                     display: "flex",
@@ -637,7 +651,22 @@ export function CalendarMonthView({
                     </div>
                   )}
                 </div>
-              )}
+              ) : overlay ? (
+                // No entries — render the consumer-provided overlay if any.
+                // Used for empty alcohol-free days etc.
+                <div
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flex: 1,
+                  }}
+                >
+                  {overlay}
+                </div>
+              ) : null}
             </div>
           );
         })}
