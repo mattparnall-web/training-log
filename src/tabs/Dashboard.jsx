@@ -12,7 +12,7 @@ const NOTES_KEY = (dateStr) => `coach-claude:notes:${dateStr}`;
 
 // ---- Anthropic proxy ----
 const PROXY_URL = "/api/proxy";
-const COACH_MODEL = "claude-opus-4-6";
+const COACH_MODEL = "claude-sonnet-4-6";
 
 async function callClaudeText(systemPrompt, userPrompt, maxTokens = 1200) {
   const r = await fetch(PROXY_URL, {

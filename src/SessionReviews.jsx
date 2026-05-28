@@ -14,7 +14,7 @@ const SUPABASE_URL = "https://bbkxvbsutpvtuizonzsn.supabase.co";
 const SUPABASE_KEY = "sb_publishable__8dc2jqeQIClVXwpZQCSWA_Y5yaV1ao";
 
 const PROXY_URL = "/api/proxy";
-const REVIEW_MODEL = "claude-opus-4-6";
+const REVIEW_MODEL = "claude-sonnet-4-6";
 
 async function sb(path, options = {}) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
