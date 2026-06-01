@@ -344,6 +344,11 @@ function ExerciseCard({ exercise, onChange, onRemove, type, allHistory }) {
           <DumbellIcon />
           <span style={{ fontWeight: "700", fontSize: "14px", color: T.text }}>{exercise.name}</span>
           {pbWeight > 0 && <span style={{ fontSize: "11px", color: "#ea580c", fontWeight: "600" }}>PB {pbWeight}kg</span>}
+          {exercise.rpe && (
+            <span style={{ fontSize: "11px", color: "#7c3aed", fontWeight: 600 }}>
+              RPE {exercise.rpe}
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           {sparkData.length > 1 && <MiniSparkline data={sparkData} color="#2563eb" />}
@@ -359,6 +364,27 @@ function ExerciseCard({ exercise, onChange, onRemove, type, allHistory }) {
               onDuplicate={() => { const sets = [...exercise.sets]; sets.splice(i + 1, 0, { ...set }); onChange({ ...exercise, sets }); }}
               onRemove={() => onChange({ ...exercise, sets: exercise.sets.filter((_, idx) => idx !== i) })} />
           ))}
+
+          {/* Per-exercise RPE — optional, 1-10 scale. Stored on the exercise
+              object so the coach sees per-lift effort in addition to the
+              session-level RPE. Empty = not recorded. */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", marginBottom: "4px" }}>
+            <span style={{ fontSize: "10px", letterSpacing: "0.1em", color: T.textMuted, fontWeight: 700 }}>RPE</span>
+            <input
+              type="number"
+              min="1"
+              max="10"
+              inputMode="numeric"
+              placeholder="1–10"
+              value={exercise.rpe ?? ""}
+              onChange={e => onChange({ ...exercise, rpe: e.target.value })}
+              style={{ ...inputStyle, width: "70px" }}
+            />
+            <span style={{ fontSize: "10px", color: T.textMuted, fontStyle: "italic" }}>
+              effort for this lift (optional)
+            </span>
+          </div>
+
           <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
             <button onClick={() => onChange({ ...exercise, sets: [...exercise.sets, { reps: "", weight: "" }] })} style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub, borderRadius: "8px", padding: "6px 14px", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontFamily: "inherit" }}><PlusIcon /> Add set</button>
             {exercise.sets.length > 0 && (

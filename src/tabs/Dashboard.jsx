@@ -263,6 +263,9 @@ function round1(n) { return Math.round(n * 10) / 10; }
 
 function summariseSession(s) {
   // Slim a session row down to a one-line text summary the coach can read.
+  // Per-exercise RPE is appended when present — gives the coach a clear
+  // signal about which lifts the athlete is grinding vs. cruising on, which
+  // a single session-level RPE can't show.
   const exParts = (s.exercises || [])
     .slice(0, 6)
     .map((ex) => {
@@ -272,10 +275,11 @@ function summariseSession(s) {
             .map((set) => `${set.reps || "?"}×${set.weight || "?"}`)
             .join(", ")
         : "(no sets)";
-      return `${ex.name}: ${repSummary}`;
+      const exRpe = ex.rpe ? ` @RPE${ex.rpe}` : "";
+      return `${ex.name}: ${repSummary}${exRpe}`;
     })
     .join(" | ");
-  return `${s.date} (${s.dayName || s.dayId}): ${exParts || "(no exercises)"}${s.rpe ? ` · RPE ${s.rpe}` : ""}${s.notes ? ` · ${s.notes}` : ""}`;
+  return `${s.date} (${s.dayName || s.dayId}): ${exParts || "(no exercises)"}${s.rpe ? ` · session RPE ${s.rpe}` : ""}${s.notes ? ` · ${s.notes}` : ""}`;
 }
 
 // ---- Coach prompt ----

@@ -135,7 +135,10 @@ function formatExercises(exs) {
     const setText = sets
       .map((s) => `${s.reps || "?"}×${s.weight ? `${s.weight}kg` : "bw"}`)
       .join(", ");
-    return `  - ${ex.name}: ${setText || "(no sets)"}`;
+    // Include per-exercise RPE when the athlete recorded one — it tells the
+    // coach how hard a specific lift felt, beyond the session-level RPE.
+    const rpeText = ex.rpe ? ` (RPE ${ex.rpe})` : "";
+    return `  - ${ex.name}: ${setText || "(no sets)"}${rpeText}`;
   }).join("\n");
 }
 
