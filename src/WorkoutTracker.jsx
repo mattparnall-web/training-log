@@ -374,7 +374,8 @@ function ExerciseCard({ exercise, onChange, onRemove, type, allHistory }) {
               type="number"
               min="1"
               max="10"
-              inputMode="numeric"
+              step="0.5"
+              inputMode="decimal"
               placeholder="1–10"
               value={exercise.rpe ?? ""}
               onChange={e => onChange({ ...exercise, rpe: e.target.value })}
@@ -873,7 +874,9 @@ function SessionLogger({ day, sessions, onSave, onClose }) {
           <div style={{ display: "flex", gap: "10px", marginBottom: "16px", marginTop: "8px" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: "11px", color: T.textSub, fontWeight: "700", marginBottom: "6px", letterSpacing: "0.08em" }}>RPE (1–10)</div>
-              <input type="number" min="1" max="10" placeholder="8" value={rpe} onChange={e => setRpe(e.target.value)} style={{ ...inputStyle, width: "100%" }} />
+              {/* step=0.5 + inputMode=decimal so you can enter half-points
+                  like 7.5 — useful for "harder than 7 but not quite 8". */}
+              <input type="number" min="1" max="10" step="0.5" inputMode="decimal" placeholder="8" value={rpe} onChange={e => setRpe(e.target.value)} style={{ ...inputStyle, width: "100%" }} />
             </div>
             <div style={{ flex: 3 }}>
               <div style={{ fontSize: "11px", color: T.textSub, fontWeight: "700", marginBottom: "6px", letterSpacing: "0.08em" }}>NOTES</div>
