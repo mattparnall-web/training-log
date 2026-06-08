@@ -2,6 +2,10 @@
 // the strava-mcp's /api/data/recent-activities endpoint, attaching the bearer
 // token here so it never reaches the browser. Same pattern as
 // /api/garmin-data uses for the morning-brief endpoint.
+//
+// Build-cache bust: the initial redeploy after this file landed re-used
+// stale build artifacts that didn't include this function (Vercel 404'd it).
+// This comment exists so a fresh git commit forces a clean rebuild.
 
 export const config = { runtime: "edge" };
 
