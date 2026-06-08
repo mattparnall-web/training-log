@@ -81,7 +81,67 @@ OUTPUT — respond ONLY with a JSON object, no preamble or markdown fences:
   "next_session_guidance": "2-3 sentences. Concrete loading/volume tweaks for the next time this day-type comes around."
 }`;
 
-function buildReviewPrompt({ session, programmeContext, recentSessions, recentReviews, plannedSession }) {
+// Pull Strava activities for a date window from our server-side proxy.
+// Returns null on any error (including missing env vars on the server) so a
+// Strava outage never blocks a review.
+async function fetchStravaForDate(dateStr) {
+  if (!dateStr) return null;
+  // Window = the day itself ±1 day. Strava sometimes records an activity
+  // crossing midnight or a near-midnight upload races the date boundary,
+  // and Garmin/Strava timezone handling isn't perfectly aligned either.
+  const since = shiftIsoDate(dateStr, -1);
+  const before = shiftIsoDate(dateStr, +1);
+  try {
+    const r = await fetch(
+      `/api/strava-data?since=${encodeURIComponent(since)}&before=${encodeURIComponent(before)}`
+    );
+    if (!r.ok) return null;
+    const json = await r.json();
+    if (!json || !Array.isArray(json.activities)) return null;
+    return json.activities;
+  } catch {
+    return null;
+  }
+}
+
+function shiftIsoDate(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+// Format the Strava activities block for the review prompt. We give the
+// coach the same kind of detail it would otherwise have to ask the athlete
+// for: distance, pace, HR averages, elevation, duration.
+function formatStravaActivities(activities, sessionDate) {
+  if (!activities || activities.length === 0) return null;
+  const lines = activities.map((a) => {
+    const bits = [];
+    if (a.distance_m) bits.push(`${(a.distance_m / 1000).toFixed(2)} km`);
+    if (a.moving_time_s) {
+      const mins = Math.round(a.moving_time_s / 60);
+      bits.push(`${mins} min moving`);
+    }
+    if (a.average_speed_mps && a.distance_m) {
+      // pace = min/km
+      const minPerKm = 1000 / a.average_speed_mps / 60;
+      const m = Math.floor(minPerKm);
+      const s = Math.round((minPerKm - m) * 60);
+      bits.push(`${m}:${String(s).padStart(2, "0")}/km avg pace`);
+    }
+    if (a.average_heartrate) bits.push(`avg HR ${Math.round(a.average_heartrate)}`);
+    if (a.max_heartrate) bits.push(`max HR ${Math.round(a.max_heartrate)}`);
+    if (a.total_elevation_gain_m) bits.push(`${Math.round(a.total_elevation_gain_m)} m elevation`);
+    if (a.suffer_score) bits.push(`Strava suffer ${a.suffer_score}`);
+    const dateLabel = a.start_date_local ? a.start_date_local.slice(0, 10) : "?";
+    const sameDay = dateLabel === sessionDate ? "" : ` [${dateLabel}]`;
+    return `  - ${a.name || a.sport_type || a.type}${sameDay}: ${bits.join(" · ")}`;
+  });
+  return lines.join("\n");
+}
+
+function buildReviewPrompt({ session, programmeContext, recentSessions, recentReviews, plannedSession, stravaActivities }) {
   const programmeBlock = programmeContext?.trim()
     ? `ATHLETE'S PROGRAMME CONTEXT (long-form — always honour this):
 """
@@ -98,6 +158,16 @@ ${plannedSession.plan_text}
 `
     : "";
 
+  // Strava block — only emitted when the strava-data proxy returned something
+  // and the session involves cardio. Sits right after the cardio section so
+  // the coach can compare what the athlete logged to what the watch recorded.
+  const stravaText = formatStravaActivities(stravaActivities, session.date);
+  const stravaBlock = stravaText
+    ? `Strava data for this date (auto-pulled from athlete's watch — use this for HR / pace / elevation context):
+${stravaText}
+`
+    : "";
+
   const sessionBlock = `COMPLETED SESSION (logged by the athlete — this is what actually happened):
 Date: ${session.date}
 Day: ${session.day_name || session.day_id || "?"} (${session.day_type || "?"})
@@ -107,7 +177,7 @@ Athlete notes: ${session.notes?.trim() || "(none)"}
 Exercises:
 ${formatExercises(session.exercises)}
 
-${session.complexes?.length ? `Complexes / AMRAP / EMOM:\n${formatComplexes(session.complexes)}\n` : ""}${session.cardio_activities?.length ? `Cardio:\n${formatCardio(session.cardio_activities)}\n` : ""}`;
+${session.complexes?.length ? `Complexes / AMRAP / EMOM:\n${formatComplexes(session.complexes)}\n` : ""}${session.cardio_activities?.length ? `Cardio:\n${formatCardio(session.cardio_activities)}\n` : ""}${stravaBlock}`;
 
   const recentBlock = recentSessions?.length
     ? `RECENT SESSIONS (for context — most recent first):
@@ -151,10 +221,20 @@ function formatComplexes(cs) {
 }
 
 function formatCardio(cs) {
+  // The cardio logger saves entries with these fields:
+  //   name, activity, distance, distanceUnit, timeMins, timeStr, pace, notes,
+  //   rpe (optional). Older code looked for duration_min which doesn't exist —
+  //   that's why the coach was seeing nothing useful.
   return cs.map((c) => {
-    const name = c.activity || c.name || "Cardio";
-    const dur = c.duration_min ? `${c.duration_min} min` : c.duration || "";
-    return `  - ${name} ${dur}`.trim();
+    const name = c.name || c.activity || "Cardio";
+    const parts = [];
+    if (c.distance && c.distanceUnit) parts.push(`${c.distance}${c.distanceUnit}`);
+    if (c.timeStr || c.timeMins) parts.push(`${c.timeStr || c.timeMins + " min"}`);
+    if (c.pace) parts.push(c.pace);
+    if (c.rpe) parts.push(`RPE ${c.rpe}`);
+    const detail = parts.join(" · ");
+    const note = c.notes?.trim() ? ` — ${c.notes.trim()}` : "";
+    return `  - ${name}${detail ? `: ${detail}` : ""}${note}`;
   }).join("\n");
 }
 
@@ -247,12 +327,22 @@ export default function SessionReviews() {
         .sort((a, b) => (a.date < b.date ? 1 : -1))
         .slice(0, 5);
 
+      // Pull Strava activities for cardio-relevant sessions only, so
+      // strength reviews aren't slowed down by an irrelevant API call.
+      const isCardioSession =
+        session.day_type === "cardio" ||
+        (Array.isArray(session.cardio_activities) && session.cardio_activities.length > 0);
+      const stravaActivities = isCardioSession
+        ? await fetchStravaForDate(session.date)
+        : null;
+
       const userPrompt = buildReviewPrompt({
         session,
         programmeContext,
         recentSessions: olderSessions,
         recentReviews: olderReviews,
         plannedSession: plansByDate[session.date],
+        stravaActivities,
       });
       const replyText = await callClaude(REVIEW_SYSTEM_PROMPT, userPrompt, 1200);
       const json = tryExtractJSON(replyText) || {};

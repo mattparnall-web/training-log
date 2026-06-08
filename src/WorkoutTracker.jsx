@@ -618,6 +618,7 @@ function CardioLogger({ onSave, onCancel }) {
   const [activity, setActivity] = useState("run");
   const [distance, setDistance] = useState("");
   const [timeStr, setTimeStr] = useState("");
+  const [rpe, setRpe] = useState("");
   const [notes, setNotes] = useState("");
 
   const act = CARDIO_ACTIVITIES.find(a => a.id === activity);
@@ -635,6 +636,9 @@ function CardioLogger({ onSave, onCancel }) {
       timeMins,
       timeStr,
       pace,
+      // Per-activity RPE (optional, 1-10 half points). Stored on the cardio
+      // entry so the review prompt + coach planner see how hard it felt.
+      rpe: rpe || null,
       notes,
     });
   }
@@ -693,6 +697,25 @@ function CardioLogger({ onSave, onCancel }) {
         </div>
       )}
 
+      {/* Per-activity RPE — same convention as strength exercises */}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+        <span style={{ fontSize: "11px", color: "#14532d", fontWeight: 700, letterSpacing: "0.08em", minWidth: "36px" }}>RPE</span>
+        <input
+          type="number"
+          min="1"
+          max="10"
+          step="0.5"
+          inputMode="decimal"
+          placeholder="1–10"
+          value={rpe}
+          onChange={e => setRpe(e.target.value)}
+          style={{ ...inputStyle, width: "70px", borderColor: "#16a34a44" }}
+        />
+        <span style={{ fontSize: "10px", color: "#16a34a", fontStyle: "italic" }}>
+          effort for this cardio (optional)
+        </span>
+      </div>
+
       <input placeholder="Notes (conditions, HR, etc.)…" value={notes} onChange={e => setNotes(e.target.value)}
         style={{ ...inputStyle, width: "100%", marginBottom: "12px" }} />
 
@@ -733,6 +756,12 @@ function CardioActivityCard({ cardio, onRemove }) {
               <div>
                 <div style={{ fontSize: "10px", color: "#16a34a", fontWeight: "700", letterSpacing: "0.08em" }}>PACE</div>
                 <div style={{ fontSize: "14px", fontWeight: "800", color: "#14532d" }}>{cardio.pace}</div>
+              </div>
+            )}
+            {cardio.rpe && (
+              <div>
+                <div style={{ fontSize: "10px", color: "#16a34a", fontWeight: "700", letterSpacing: "0.08em" }}>RPE</div>
+                <div style={{ fontSize: "14px", fontWeight: "800", color: "#14532d" }}>{cardio.rpe}</div>
               </div>
             )}
           </div>

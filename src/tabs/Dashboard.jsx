@@ -279,7 +279,23 @@ function summariseSession(s) {
       return `${ex.name}: ${repSummary}${exRpe}`;
     })
     .join(" | ");
-  return `${s.date} (${s.dayName || s.dayId}): ${exParts || "(no exercises)"}${s.rpe ? ` · session RPE ${s.rpe}` : ""}${s.notes ? ` · ${s.notes}` : ""}`;
+  // Cardio activities — the previous summariser ignored these, so cardio days
+  // looked like empty sessions to the coach. We pull the headline metrics
+  // (activity / distance / time / pace / RPE) inline.
+  // The session row uses snake_case (cardio_activities) when read from
+  // /api/sessions, but camelCase (cardioActivities) when read via the
+  // WorkoutTracker's local Supabase client. Accept either.
+  const cardio = s.cardio_activities || s.cardioActivities || [];
+  const cardioParts = cardio.map((c) => {
+    const bits = [];
+    if (c.distance && c.distanceUnit) bits.push(`${c.distance}${c.distanceUnit}`);
+    if (c.timeStr || c.timeMins) bits.push(c.timeStr || `${c.timeMins} min`);
+    if (c.pace) bits.push(c.pace);
+    if (c.rpe) bits.push(`RPE ${c.rpe}`);
+    return `${c.name || c.activity || "Cardio"} ${bits.join(" ")}`.trim();
+  }).join(" | ");
+  const allParts = [exParts, cardioParts].filter(Boolean).join(" | ");
+  return `${s.date} (${s.dayName || s.dayId}): ${allParts || "(no exercises)"}${s.rpe ? ` · session RPE ${s.rpe}` : ""}${s.notes ? ` · ${s.notes}` : ""}`;
 }
 
 // ---- Coach prompt ----
