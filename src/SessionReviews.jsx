@@ -92,8 +92,12 @@ OUTPUT — respond ONLY with a JSON object, no preamble or markdown fences:
 async function fetchGarminActivitiesForDate(dateStr) {
   if (!dateStr) return null;
   try {
+    // We route through the existing /api/garmin-data proxy with kind=activities
+    // rather than a separate /api/garmin-activities file because Vercel
+    // refuses to route newly-added api/*.js files on this project (see
+    // garmin-data.js header comment for the gory details).
     const r = await fetch(
-      `/api/garmin-activities?date=${encodeURIComponent(dateStr)}`
+      `/api/garmin-data?date=${encodeURIComponent(dateStr)}&kind=activities`
     );
     if (!r.ok) return null;
     const json = await r.json();

@@ -1,6 +1,23 @@
-// Server-side proxy: forwards Coach Claude dashboard requests to the
-// garmin-mcp Vercel function, attaching the bearer token here so it never
-// reaches the browser. Same pattern as /api/proxy uses for Anthropic.
+// Server-side proxy: forwards Coach Claude requests to the garmin-mcp
+// Vercel function, attaching the bearer token here so it never reaches the
+// browser. Same pattern as /api/proxy uses for Anthropic.
+//
+// Two flavours, switched by the `kind` query param:
+//   GET /api/garmin-data?date=YYYY-MM-DD
+//     → forwards to garmin-mcp /api/data/morning-brief
+//     → returns sleep / body battery / HRV / training readiness / training
+//       status / daily summary. Used by the dashboard wake-up call.
+//
+//   GET /api/garmin-data?date=YYYY-MM-DD&kind=activities
+//     → forwards to garmin-mcp /api/data/activities
+//     → returns the activities Garmin recorded for that calendar date
+//       (HR, pace, distance, training effect). Used by the post-session
+//       coach review for cardio days.
+//
+// Why this is one function not two: Vercel has been refusing to route
+// newly-added api/*.js files on this project (404s despite being shown as
+// registered in the deployment Output). Extending the working file
+// sidesteps that bug entirely.
 
 export const config = { runtime: "edge" };
 
@@ -24,6 +41,7 @@ export default async function handler(req) {
   // Pull the date param off the incoming URL and forward to garmin-mcp.
   const incoming = new URL(req.url);
   const date = incoming.searchParams.get("date");
+  const kind = incoming.searchParams.get("kind") || "morning-brief";
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return new Response(
       JSON.stringify({ error: "Missing or malformed ?date=YYYY-MM-DD" }),
@@ -31,7 +49,11 @@ export default async function handler(req) {
     );
   }
 
-  const target = new URL(`${baseUrl.replace(/\/$/, "")}/api/data/morning-brief`);
+  // Map the kind to the upstream endpoint. Anything we don't recognise
+  // falls back to morning-brief so legacy callers keep working.
+  const upstreamPath =
+    kind === "activities" ? "/api/data/activities" : "/api/data/morning-brief";
+  const target = new URL(`${baseUrl.replace(/\/$/, "")}${upstreamPath}`);
   target.searchParams.set("date", date);
 
   try {
