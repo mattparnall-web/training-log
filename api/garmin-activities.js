@@ -2,6 +2,11 @@
 // the garmin-mcp's /api/data/activities endpoint, attaching the bearer token
 // here so it never reaches the browser.
 //
+// Build-cache bust: same Vercel issue as with the original strava-data file —
+// the first deploy after adding a new api/*.js file 404s even though Output
+// shows it registered. A subsequent commit that modifies the file makes it
+// resolve. This comment is the bust.
+//
 // Why this exists separate from /api/garmin-data: morning-brief is the
 // dashboard's wake-up call (sleep, body battery, HRV, readiness, training
 // status, daily summary). This one is for the post-session review and
