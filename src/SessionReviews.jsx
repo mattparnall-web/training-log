@@ -49,17 +49,54 @@ async function callClaude(systemPrompt, userPrompt, maxTokens = 1200) {
   return block.text.trim();
 }
 
-// ---- JSON extraction (same helper used in the planner) ----
+// ---- JSON extraction — robust to fenced + truncated output ----
+// See Dashboard.jsx tryExtractJSON for the full rationale on each layer.
 function tryExtractJSON(text) {
   try { return JSON.parse(text); } catch {}
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fence) {
-    try { return JSON.parse(fence[1]); } catch {}
+
+  const closedFence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (closedFence) {
+    try { return JSON.parse(closedFence[1]); } catch {}
   }
-  const brace = text.match(/\{[\s\S]*\}/);
+  const openFence = text.match(/```(?:json)?\s*([\s\S]+)$/);
+  const candidate = openFence ? openFence[1] : text;
+
+  const brace = candidate.match(/\{[\s\S]*\}/);
   if (brace) {
     try { return JSON.parse(brace[0]); } catch {}
   }
+
+  const firstBrace = candidate.indexOf("{");
+  if (firstBrace === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let lastValidEnd = -1;
+  for (let i = firstBrace; i < candidate.length; i++) {
+    const ch = candidate[i];
+    if (inString) {
+      if (escape) { escape = false; continue; }
+      if (ch === "\\") { escape = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) lastValidEnd = i;
+    }
+  }
+  if (lastValidEnd > firstBrace) {
+    try { return JSON.parse(candidate.slice(firstBrace, lastValidEnd + 1)); } catch {}
+  }
+  let repaired = candidate.slice(firstBrace);
+  if (inString) repaired += '"';
+  repaired = repaired.replace(/[,\s]*(?:"[^"]*"\s*:\s*)?[^,{}\[\]"]*$/, "");
+  let openBraces = (repaired.match(/{/g) || []).length - (repaired.match(/}/g) || []).length;
+  while (openBraces-- > 0) repaired += "}";
+  try { return JSON.parse(repaired); } catch {}
+
   return null;
 }
 
@@ -350,7 +387,9 @@ export default function SessionReviews() {
         plannedSession: plansByDate[session.date],
         garminActivities,
       });
-      const replyText = await callClaude(REVIEW_SYSTEM_PROMPT, userPrompt, 1200);
+      // 3000 tokens — review responses now include four prose sections and
+      // sometimes cite specific lifts; 1200 was bumping the ceiling.
+      const replyText = await callClaude(REVIEW_SYSTEM_PROMPT, userPrompt, 3000);
       const json = tryExtractJSON(replyText) || {};
 
       const row = {

@@ -393,7 +393,7 @@ Hard rules:
 - Treat athlete free-text notes as high-signal input — adapt the session around them.
 - If yesterday's nutrition was well under calories or protein was way low, mention it briefly but don't lecture.
 
-OUTPUT FORMAT — respond ONLY with a JSON object. No preamble, no markdown fences, no text outside the JSON. The JSON has exactly these keys:
+OUTPUT FORMAT — respond ONLY with a raw JSON object. CRITICAL: do NOT wrap the JSON in markdown code fences (no \`\`\`json, no \`\`\`, nothing). Do NOT add any prose before or after. Your entire response must start with { and end with }. The JSON has exactly these keys:
 
 {
   "summary": "One or two sentences explaining your reasoning — the recovery picture and how today's session is calibrated to it.",
@@ -454,16 +454,77 @@ function numOrNull(v) {
 }
 
 // ---- Parse Claude's response: JSON first, fall back to text headers ----
+//
+// Robustness layers — in order of preference:
+//   1. Direct JSON.parse on the whole reply (the happy path).
+//   2. If wrapped in ```json ... ``` fences (closed): extract inner, parse.
+//   3. If only the opening fence ```json arrived (truncated mid-output):
+//      strip everything before the first '{' and try parsing what remains.
+//   4. Take the longest balanced {...} substring and parse that.
+//   5. If even that fails on truncated output, walk forward from the first '{'
+//      and brace-balance manually until we lose the balance, then parse the
+//      partial content with a best-effort closing brace appended. This lets
+//      a half-finished response still render its summary + earlier exercises.
 function tryExtractJSON(text) {
   try { return JSON.parse(text); } catch {}
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fenceMatch) {
-    try { return JSON.parse(fenceMatch[1]); } catch {}
+
+  // Closed fence
+  const closedFence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (closedFence) {
+    try { return JSON.parse(closedFence[1]); } catch {}
   }
-  const braceMatch = text.match(/\{[\s\S]*\}/);
+
+  // Open fence — strip the fence prefix, keep the rest
+  const openFence = text.match(/```(?:json)?\s*([\s\S]+)$/);
+  const candidate = openFence ? openFence[1] : text;
+
+  // Balanced-brace match
+  const braceMatch = candidate.match(/\{[\s\S]*\}/);
   if (braceMatch) {
     try { return JSON.parse(braceMatch[0]); } catch {}
   }
+
+  // Manual brace-balance recovery for truncated output. Walk character by
+  // character from the first '{', tracking nesting and whether we're inside
+  // a string. When we hit the end of input mid-object, close the open braces
+  // and try parsing. Strings that were left open get a closing quote first.
+  const firstBrace = candidate.indexOf("{");
+  if (firstBrace === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let lastValidEnd = -1;
+  for (let i = firstBrace; i < candidate.length; i++) {
+    const ch = candidate[i];
+    if (inString) {
+      if (escape) { escape = false; continue; }
+      if (ch === "\\") { escape = true; continue; }
+      if (ch === '"') { inString = false; }
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) lastValidEnd = i;
+    }
+  }
+  if (lastValidEnd > firstBrace) {
+    // We saw a complete closing brace somewhere; try that substring.
+    try { return JSON.parse(candidate.slice(firstBrace, lastValidEnd + 1)); } catch {}
+  }
+  // Truly truncated: try to repair by closing open string + braces, then
+  // trim a trailing partial value. Best-effort.
+  let repaired = candidate.slice(firstBrace);
+  if (inString) repaired += '"';
+  // Strip trailing partial token after the last comma or '{' or ':' so we
+  // don't try to parse an incomplete value.
+  repaired = repaired.replace(/[,\s]*(?:"[^"]*"\s*:\s*)?[^,{}\[\]"]*$/, "");
+  // Close any unbalanced braces.
+  let openBraces = (repaired.match(/{/g) || []).length - (repaired.match(/}/g) || []).length;
+  while (openBraces-- > 0) repaired += "}";
+  try { return JSON.parse(repaired); } catch {}
+
   return null;
 }
 
@@ -703,7 +764,11 @@ export default function Dashboard() {
         yesterdayTargets,
         athleteNotes: notes,
       });
-      const replyText = await callClaudeText(COACH_SYSTEM_PROMPT, userPrompt, 1400);
+      // 4000 tokens gives the coach plenty of headroom now that the prompt
+      // includes programme context + weekly schedule + recent reviews + per-
+      // exercise RPE. With 1400 the JSON was getting truncated mid-output,
+      // which dropped the renderer into raw-text fallback.
+      const replyText = await callClaudeText(COACH_SYSTEM_PROMPT, userPrompt, 4000);
       const parsed = parseCoachReply(replyText);
 
       // Persist the raw reply text so we can re-parse on load (lets us evolve
@@ -784,7 +849,7 @@ ${feedbackText.trim()}
 """
 
 Revise the plan to address the feedback. Same JSON output format.`;
-      const replyText = await callClaudeText(COACH_REVISE_SYSTEM_PROMPT, userPrompt, 1400);
+      const replyText = await callClaudeText(COACH_REVISE_SYSTEM_PROMPT, userPrompt, 4000);
       const parsed = parseCoachReply(replyText);
 
       const row = {
