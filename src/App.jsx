@@ -12,7 +12,7 @@ const TABS = [
   { id: "workout",   label: "Workout",  icon: DumbellIcon, Component: WorkoutTracker },
   { id: "food",      label: "Food",     icon: ForkIcon,    Component: Food },
   { id: "supps",     label: "Supps",    icon: PillIcon,    Component: Supps },
-  { id: "alcohol",   label: "Alcohol",  icon: GlassIcon,   Component: Alcohol },
+  { id: "alcohol",   label: "Drinks",   icon: GlassIcon,   Component: Alcohol },
   { id: "settings",  label: "Settings", icon: GearIcon,    Component: Settings },
 ];
 

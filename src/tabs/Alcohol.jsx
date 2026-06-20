@@ -20,12 +20,43 @@ const DRINKS = [
   { type: "cocktail", portion: "standard", label: "Cocktail", emoji: "🍸", units: 2.00, calories: 200 },
 ];
 
+// Water quick-tap. Stored in the same alcohol_entries table with units=0 and
+// calories=0 — the `portion` field carries the volume label, which we parse
+// back into millilitres for the daily total. Keeps everything in one table
+// without a schema migration. The dashboard + calendar filter water out of
+// alcohol-specific stats by drink_type.
+const WATER_OPTIONS = [
+  { type: "water", portion: "300ml",  label: "300 ml",  emoji: "💧", units: 0, calories: 0, ml: 300 },
+  { type: "water", portion: "500ml",  label: "500 ml",  emoji: "💧", units: 0, calories: 0, ml: 500 },
+  { type: "water", portion: "1000ml", label: "1 litre", emoji: "💦", units: 0, calories: 0, ml: 1000 },
+];
+
 const TYPE_COLOR = {
   beer:     "#f59e0b",
   wine:     "#be185d",
   spirit:   "#7c3aed",
   cocktail: "#0891b2",
+  water:    "#0ea5e9",
 };
+
+// Extract a millilitre count from an entry's portion string ("300ml",
+// "500ml", "1000ml", "1L"…). Returns 0 if not parseable.
+function waterMlOf(entry) {
+  if (entry?.drink_type !== "water") return 0;
+  const p = String(entry.portion || "").toLowerCase();
+  const litreMatch = p.match(/^([\d.]+)\s*l$/);
+  if (litreMatch) return Math.round(parseFloat(litreMatch[1]) * 1000);
+  const mlMatch = p.match(/^([\d.]+)\s*ml$/);
+  if (mlMatch) return Math.round(parseFloat(mlMatch[1]));
+  return 0;
+}
+
+// Display a millilitre count as either "350 ml" (under 1L) or "1.2 L".
+function fmtMl(ml) {
+  if (!ml) return "0 ml";
+  if (ml >= 1000) return `${(ml / 1000).toFixed(ml % 1000 === 0 ? 0 : 1)} L`;
+  return `${ml} ml`;
+}
 
 // How far back to fetch on mount. ~3 months is enough for the typical calendar browse.
 const LOOKBACK_DAYS = 90;
@@ -84,10 +115,19 @@ export default function Alcohol() {
     return t >= weekStartMs && t <= weekEndMs;
   });
 
+  // Split into alcohol vs water so the unit/calorie stats only count drinks
+  // that actually have units + calories. Water rows are zero-valued and would
+  // be inert in those sums anyway, but separating them keeps the entry rows
+  // grouped sensibly in the day list.
+  const alcoholDayEntries = dayEntries.filter((e) => e.drink_type !== "water");
+  const waterDayEntries = dayEntries.filter((e) => e.drink_type === "water");
+  const alcoholWeekEntries = weekEntries.filter((e) => e.drink_type !== "water");
+
   const sum = (arr, key) => arr.reduce((acc, e) => acc + Number(e[key] || 0), 0);
-  const dayUnits = round1(sum(dayEntries, "units"));
-  const dayCals = Math.round(sum(dayEntries, "calories"));
-  const weekUnits = round1(sum(weekEntries, "units"));
+  const dayUnits = round1(sum(alcoholDayEntries, "units"));
+  const dayCals = Math.round(sum(alcoholDayEntries, "calories"));
+  const weekUnits = round1(sum(alcoholWeekEntries, "units"));
+  const dayWaterMl = waterDayEntries.reduce((a, e) => a + waterMlOf(e), 0);
 
   const weeklyPct = weeklyTarget
     ? Math.min(100, Math.round((weekUnits / weeklyTarget) * 100))
@@ -149,7 +189,9 @@ export default function Alcohol() {
           {e.display_label || `${e.drink_type} (${e.portion})`}
         </div>
         <div style={{ fontSize: "11px", color: T.textMuted }}>
-          {Number(e.units).toFixed(1)} units · {e.calories} cal · {timeOf(e.consumed_at)}
+          {e.drink_type === "water"
+            ? `${fmtMl(waterMlOf(e))} · ${timeOf(e.consumed_at)}`
+            : `${Number(e.units).toFixed(1)} units · ${e.calories} cal · ${timeOf(e.consumed_at)}`}
         </div>
       </div>
       <button
@@ -171,7 +213,7 @@ export default function Alcohol() {
 
   return (
     <div style={{ padding: "20px", paddingBottom: "100px" }}>
-      <div style={{ ...display, fontSize: "36px", marginBottom: "4px" }}>ALCOHOL</div>
+      <div style={{ ...display, fontSize: "36px", marginBottom: "4px" }}>DRINKS</div>
       <div
         style={{
           fontSize: "11px",
@@ -181,7 +223,7 @@ export default function Alcohol() {
           fontWeight: 600,
         }}
       >
-        QUICK-TAP · UK UNITS
+        ALCOHOL · HYDRATION
       </div>
 
       <SubTabs
@@ -240,6 +282,66 @@ export default function Alcohol() {
             />
           </div>
 
+          {/* ---- Water quick-tap (hydration) ---- */}
+          <div style={{ marginBottom: "20px" }}>
+            <div
+              style={{
+                fontSize: "11px",
+                letterSpacing: "0.15em",
+                color: T.textMuted,
+                fontWeight: 600,
+                marginBottom: "10px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+              }}
+            >
+              <span>WATER{!isToday ? ` · ${prettyDate(selectedDate).toUpperCase()}` : ""}</span>
+              <span style={{ color: TYPE_COLOR.water, fontWeight: 700 }}>
+                {fmtMl(dayWaterMl)} today
+              </span>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: "8px",
+              }}
+            >
+              {WATER_OPTIONS.map((d) => {
+                const busy = logging === `${d.type}_${d.portion}`;
+                return (
+                  <button
+                    key={`${d.type}_${d.portion}`}
+                    onClick={() => quickLog(d)}
+                    disabled={!!logging}
+                    style={{
+                      background: "#f0f9ff",
+                      border: `1px solid #bae6fd`,
+                      borderLeft: `4px solid ${TYPE_COLOR.water}`,
+                      borderRadius: "10px",
+                      padding: "12px 8px",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: "4px",
+                      cursor: logging ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      opacity: logging && !busy ? 0.5 : 1,
+                      transition: "transform 0.08s",
+                      transform: busy ? "scale(0.97)" : "scale(1)",
+                    }}
+                  >
+                    <div style={{ fontSize: "22px", lineHeight: 1 }}>{d.emoji}</div>
+                    <div style={{ fontSize: "13px", fontWeight: 700, color: "#0c4a6e" }}>
+                      {d.label}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Quick-tap grid */}
           <div style={{ marginBottom: "20px" }}>
             <div
@@ -251,7 +353,7 @@ export default function Alcohol() {
                 marginBottom: "10px",
               }}
             >
-              TAP TO LOG{!isToday ? ` · FOR ${prettyDate(selectedDate).toUpperCase()}` : ""}
+              ALCOHOL · TAP TO LOG{!isToday ? ` · FOR ${prettyDate(selectedDate).toUpperCase()}` : ""}
             </div>
             <div
               style={{
@@ -361,23 +463,25 @@ export default function Alcohol() {
         <CalendarMonthView
           entries={entries}
           dotColorOf={(e) => TYPE_COLOR[e.drink_type] || T.accent}
-          // Mark alcohol-free past days in green. We restrict the range to
-          // [first ever entry, today] so we don't paint every day since 1970.
-          // If there are no entries at all, we have no signal yet and skip.
+          // Mark alcohol-free past days in green. A day with ONLY water logged
+          // still counts as alcohol-free — water entries don't disqualify the
+          // green shading. Restrict to [first ever entry, today] so we don't
+          // paint every day since 1970.
           dayBackgroundOf={(dayEntries, ds) => {
-            if (dayEntries.length > 0) return null;
+            const alcohol = dayEntries.filter((e) => e.drink_type !== "water");
+            if (alcohol.length > 0) return null;
             if (entries.length === 0) return null;
             const todayStr = todayString();
-            // entries are sorted desc by consumed_at; the last is the earliest.
             const earliest = dateStrOf(entries[entries.length - 1].consumed_at);
             if (ds < earliest || ds > todayStr) return null;
             return "#bbf7d0"; // light green
           }}
-          // For each green (alcohol-free) day, stamp the literal "WEAK TO STRONG"
-          // label across the cell. Stacked across three short lines so it fits
-          // a calendar square on mobile.
+          // Stamp 'WEAK / TO / STRONG' across alcohol-free past days (water-only
+          // counts). Stacked across three short lines so it fits a calendar
+          // square on mobile.
           dayInnerOverlay={(dayEntries, ds) => {
-            if (dayEntries.length > 0) return null;
+            const alcohol = dayEntries.filter((e) => e.drink_type !== "water");
+            if (alcohol.length > 0) return null;
             if (entries.length === 0) return null;
             const todayStr = todayString();
             const earliest = dateStrOf(entries[entries.length - 1].consumed_at);
@@ -404,22 +508,27 @@ export default function Alcohol() {
             setSelectedDate(ds);
             setView("log");
           }}
-          renderDayDetail={(dayEntries) => (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              {dayEntries.map(renderEntryRow)}
-              <div
-                style={{
-                  fontSize: "11px",
-                  color: T.textMuted,
-                  marginTop: "4px",
-                  paddingTop: "8px",
-                  borderTop: `1px solid ${T.border}`,
-                }}
-              >
-                {dayEntries.length} drinks · {round1(dayEntries.reduce((a, e) => a + Number(e.units || 0), 0))} units · {Math.round(dayEntries.reduce((a, e) => a + Number(e.calories || 0), 0))} cal
+          renderDayDetail={(dayEntries) => {
+            const alcoholOnly = dayEntries.filter((e) => e.drink_type !== "water");
+            const totalMl = dayEntries.reduce((a, e) => a + waterMlOf(e), 0);
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {dayEntries.map(renderEntryRow)}
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: T.textMuted,
+                    marginTop: "4px",
+                    paddingTop: "8px",
+                    borderTop: `1px solid ${T.border}`,
+                  }}
+                >
+                  {alcoholOnly.length} drinks · {round1(alcoholOnly.reduce((a, e) => a + Number(e.units || 0), 0))} units · {Math.round(alcoholOnly.reduce((a, e) => a + Number(e.calories || 0), 0))} cal
+                  {totalMl > 0 ? ` · ${fmtMl(totalMl)} water` : ""}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          }}
         />
       )}
     </div>

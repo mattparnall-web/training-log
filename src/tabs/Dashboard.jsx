@@ -261,6 +261,19 @@ function hoursMinutes(seconds) {
 function valueOrDash(v, unit = "") { return v == null ? "—" : `${v}${unit}`; }
 function round1(n) { return Math.round(n * 10) / 10; }
 
+// Extract millilitres from a water entry's portion field ("300ml" / "1000ml"
+// / "1L"). Mirrors the helper in Alcohol.jsx — duplicated rather than imported
+// because Dashboard reads alcohol_entries directly for the coach prompt.
+function waterMlOf(entry) {
+  if (entry?.drink_type !== "water") return 0;
+  const p = String(entry.portion || "").toLowerCase();
+  const litreMatch = p.match(/^([\d.]+)\s*l$/);
+  if (litreMatch) return Math.round(parseFloat(litreMatch[1]) * 1000);
+  const mlMatch = p.match(/^([\d.]+)\s*ml$/);
+  if (mlMatch) return Math.round(parseFloat(mlMatch[1]));
+  return 0;
+}
+
 function summariseSession(s) {
   // Slim a session row down to a one-line text summary the coach can read.
   // Per-exercise RPE is appended when present — gives the coach a clear
@@ -371,6 +384,7 @@ YESTERDAY'S INTAKE (vs yesterday's day-type targets — bucket: ${yesterdayTarge
   - Fat: ${yIntake?.fat_g ?? 0} g (target ${yesterdayTargets?.fat_g ?? "?"})
   - Carbs: ${yIntake?.carbs_g ?? 0} g (target ${yesterdayTargets?.carbs_g ?? "?"})
   - Alcohol: ${yIntake?.drinks ?? 0} drinks, ${yIntake?.units ?? 0} units
+  - Water:   ${yIntake?.water_ml ? `${(yIntake.water_ml / 1000).toFixed(1)} L logged` : "not logged"}
 
 RECENT SESSIONS (most recent first, up to 10):
   ${recentText}
@@ -744,13 +758,21 @@ export default function Dashboard() {
         fetchRecentSessions(10),
         fetchRecentReviews(5),
       ]);
+      // Split water out of the "alcohol" stats — the Drinks tab uses one
+      // table for both, but the coach prompt should see them separately so
+      // hydration shows as a positive signal and alcohol units stay accurate.
+      const alcoholOnly = alcoholYesterday.filter((e) => e.drink_type !== "water");
+      const waterMl = alcoholYesterday
+        .filter((e) => e.drink_type === "water")
+        .reduce((a, e) => a + waterMlOf(e), 0);
       const yIntake = {
         calories: yCalories,
         protein_g: yProtein,
         fat_g: yFat,
         carbs_g: yCarbs,
-        drinks: alcoholYesterday.length,
-        units: round1(alcoholYesterday.reduce((a, e) => a + Number(e.units || 0), 0)),
+        drinks: alcoholOnly.length,
+        units: round1(alcoholOnly.reduce((a, e) => a + Number(e.units || 0), 0)),
+        water_ml: waterMl,
       };
       const userPrompt = buildCoachPrompt({
         dateStr: selectedDate,
@@ -813,13 +835,21 @@ export default function Dashboard() {
         fetchRecentSessions(10),
         fetchRecentReviews(5),
       ]);
+      // Split water out of the "alcohol" stats — the Drinks tab uses one
+      // table for both, but the coach prompt should see them separately so
+      // hydration shows as a positive signal and alcohol units stay accurate.
+      const alcoholOnly = alcoholYesterday.filter((e) => e.drink_type !== "water");
+      const waterMl = alcoholYesterday
+        .filter((e) => e.drink_type === "water")
+        .reduce((a, e) => a + waterMlOf(e), 0);
       const yIntake = {
         calories: yCalories,
         protein_g: yProtein,
         fat_g: yFat,
         carbs_g: yCarbs,
-        drinks: alcoholYesterday.length,
-        units: round1(alcoholYesterday.reduce((a, e) => a + Number(e.units || 0), 0)),
+        drinks: alcoholOnly.length,
+        units: round1(alcoholOnly.reduce((a, e) => a + Number(e.units || 0), 0)),
+        water_ml: waterMl,
       };
       const baseContext = buildCoachPrompt({
         dateStr: selectedDate,
