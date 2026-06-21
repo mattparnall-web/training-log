@@ -28,6 +28,7 @@ const DRINKS = [
 const WATER_OPTIONS = [
   { type: "water", portion: "300ml",  label: "300 ml",  emoji: "💧", units: 0, calories: 0, ml: 300 },
   { type: "water", portion: "500ml",  label: "500 ml",  emoji: "💧", units: 0, calories: 0, ml: 500 },
+  { type: "water", portion: "750ml",  label: "750 ml",  emoji: "💧", units: 0, calories: 0, ml: 750 },
   { type: "water", portion: "1000ml", label: "1 litre", emoji: "💦", units: 0, calories: 0, ml: 1000 },
 ];
 
@@ -304,8 +305,8 @@ export default function Alcohol() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr",
-                gap: "8px",
+                gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                gap: "6px",
               }}
             >
               {WATER_OPTIONS.map((d) => {

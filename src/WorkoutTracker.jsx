@@ -576,6 +576,9 @@ const CARDIO_ACTIVITIES = [
   { id: "bike", label: "Bike", icon: "🚴", color: "#2563eb", unit: "km" },
   { id: "row", label: "Row", icon: "🚣", color: "#0891b2", unit: "m" },
   { id: "swim", label: "Swim", icon: "🏊", color: "#7c3aed", unit: "m" },
+  // Boxing logged by rounds (one round = ~3 min typically). Pace calc gives
+  // min/round so you can compare intensity across sessions.
+  { id: "boxing", label: "Boxing", icon: "🥊", color: "#dc2626", unit: "rounds" },
 ];
 
 function calcPace(activity, distRaw, timeMins) {
@@ -583,7 +586,14 @@ function calcPace(activity, distRaw, timeMins) {
   const dist = parseFloat(distRaw);
   if (!dist || dist <= 0) return null;
 
-  if (activity === "row" || activity === "swim") {
+  if (activity === "boxing") {
+    // Boxing: time per round (typical round = 3 min, so anything close to
+    // that is high intensity; longer = lower density).
+    const perRound = timeMins / dist;
+    const mins = Math.floor(perRound);
+    const secs = Math.round((perRound - mins) * 60);
+    return `${mins}:${String(secs).padStart(2,"0")} /round`;
+  } else if (activity === "row" || activity === "swim") {
     // pace per 500m
     const distKm = dist / 1000;
     const per500 = timeMins / (distKm * 2);
@@ -650,8 +660,8 @@ function CardioLogger({ onSave, onCancel }) {
         <span style={{ fontSize: "12px", fontWeight: "800", color: "#14532d", letterSpacing: "0.08em" }}>CARDIO</span>
       </div>
 
-      {/* Activity selector */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px", marginBottom: "14px" }}>
+      {/* Activity selector — 5 columns since boxing was added */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "5px", marginBottom: "14px" }}>
         {CARDIO_ACTIVITIES.map(a => (
           <button key={a.id} onClick={() => { setActivity(a.id); setDistance(""); setTimeStr(""); }}
             style={{
