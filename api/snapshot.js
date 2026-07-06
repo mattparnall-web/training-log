@@ -51,6 +51,9 @@ const TABLES = [
   { key: "food_entries",     table: "food_entries",     dateColumn: "consumed_at", select: "*", order: "consumed_at.asc" },
   { key: "supps_entries",    table: "supps_entries",    dateColumn: "consumed_at", select: "*", order: "consumed_at.asc" },
   { key: "alcohol_entries",  table: "alcohol_entries",  dateColumn: "consumed_at", select: "*", order: "consumed_at.asc" },
+  // Refinements are lightweight — not time-bounded here so Claude chat
+  // (which reads this endpoint) always sees the full current + historical set.
+  { key: "programme_refinements", table: "programme_refinements", dateColumn: null, select: "*", order: "created_at.desc" },
 ];
 
 const ALL_KEYS = TABLES.map((t) => t.key);

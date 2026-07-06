@@ -312,7 +312,7 @@ function summariseSession(s) {
 }
 
 // ---- Coach prompt ----
-function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, recentReviews, yIntake, todayTargets, yesterdayTargets, athleteNotes }) {
+function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, recentReviews, refinements, yIntake, todayTargets, yesterdayTargets, athleteNotes }) {
   const sleep = pickSleep(garmin?.sleep);
   const bb = pickBodyBattery(garmin?.body_battery);
   const hrv = pickHRV(garmin?.hrv);
@@ -327,10 +327,27 @@ function buildCoachPrompt({ dateStr, day, settings, garmin, recentSessions, rece
     ? recentSessions.map(summariseSession).join("\n  ")
     : "  (no recent sessions logged)";
 
+  // Active programme refinements — short-lived constraints / overrides that
+  // came out of ad-hoc Claude chat sessions (injuries, temporary swaps,
+  // deload weeks, etc). Placed ABOVE the standing programme context so they
+  // can override the long-form strategy when they conflict. The coach must
+  // treat these as CURRENT and non-negotiable.
+  const refinementsBlock = Array.isArray(refinements) && refinements.length > 0
+    ? `CURRENT PROGRAMME REFINEMENTS (constraints agreed in recent coaching conversations — these OVERRIDE the standing programme context when they conflict):
+${refinements.map((r) => {
+  const when = r.created_at ? new Date(r.created_at).toISOString().slice(0, 10) : "?";
+  const exp = r.expires_at ? ` (expires ${new Date(r.expires_at).toISOString().slice(0, 10)})` : "";
+  return `  [${when}${exp}] ${r.note}`;
+}).join("\n")}
+
+`
+    : "";
+
   // Programme-level context the athlete pasted from earlier coaching chats.
-  // We put this at the top so it anchors all downstream reasoning.
+  // Standing strategy, goals, history, injuries. Anchors all downstream
+  // reasoning; refinements above may override specific items.
   const programmeContextBlock = settings?.programme_context?.trim()
-    ? `ATHLETE'S PROGRAMME CONTEXT (long-form, set by the athlete — always honour this):
+    ? `ATHLETE'S PROGRAMME CONTEXT (long-form, set by the athlete — always honour this UNLESS a CURRENT PROGRAMME REFINEMENT above says otherwise):
 """
 ${settings.programme_context.trim()}
 """
@@ -357,7 +374,7 @@ ${recentReviews.map((r) => `  - ${r.date} ${r.day_name || ""}: ${r.summary || "(
 `
     : "";
 
-  return `${programmeContextBlock}${scheduleBlock}${reviewsBlock}DATE: ${dateStr}
+  return `${refinementsBlock}${programmeContextBlock}${scheduleBlock}${reviewsBlock}DATE: ${dateStr}
 DAY OF WEEK: ${day.label} — programme says: ${day.name} (type: ${day.type})
 
 KEY LIFT TARGETS (athlete's current 1-rep targets or working weights):
@@ -602,6 +619,22 @@ async function fetchRecentReviews(limit = 5) {
   }
 }
 
+// ---- Read active + non-expired programme refinements ----
+// These come from Claude chat conversations where Matt agrees on a
+// constraint, injury adaptation, or temporary override. The coach must
+// honour them on every plan generation.
+async function fetchActiveRefinements() {
+  try {
+    const now = new Date().toISOString();
+    const rows = await sb(
+      `/programme_refinements?select=id,note,source,expires_at,created_at&active=eq.true&or=(expires_at.is.null,expires_at.gt.${encodeURIComponent(now)})&order=created_at.desc`
+    );
+    return rows || [];
+  } catch {
+    return [];
+  }
+}
+
 // ===========================================================================
 //                                DASHBOARD
 // ===========================================================================
@@ -754,9 +787,10 @@ export default function Dashboard() {
     setCoachBusy(true);
     setCoachError(null);
     try {
-      const [recentSessions, recentReviews] = await Promise.all([
+      const [recentSessions, recentReviews, refinements] = await Promise.all([
         fetchRecentSessions(10),
         fetchRecentReviews(5),
+        fetchActiveRefinements(),
       ]);
       // Split water out of the "alcohol" stats — the Drinks tab uses one
       // table for both, but the coach prompt should see them separately so
@@ -781,6 +815,7 @@ export default function Dashboard() {
         garmin,
         recentSessions,
         recentReviews,
+        refinements,
         yIntake,
         todayTargets,
         yesterdayTargets,
@@ -831,9 +866,10 @@ export default function Dashboard() {
     setCoachBusy(true);
     setCoachError(null);
     try {
-      const [recentSessions, recentReviews] = await Promise.all([
+      const [recentSessions, recentReviews, refinements] = await Promise.all([
         fetchRecentSessions(10),
         fetchRecentReviews(5),
+        fetchActiveRefinements(),
       ]);
       // Split water out of the "alcohol" stats — the Drinks tab uses one
       // table for both, but the coach prompt should see them separately so
@@ -858,6 +894,7 @@ export default function Dashboard() {
         garmin,
         recentSessions,
         recentReviews,
+        refinements,
         yIntake,
         todayTargets,
         yesterdayTargets,

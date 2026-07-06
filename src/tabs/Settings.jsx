@@ -88,8 +88,49 @@ export default function Settings() {
     big:     { calories: "", protein_g: "", fat_g: "", carbs_g: "" },
   });
 
+  // Programme refinements — short-lived constraints/overrides written by
+  // Claude chat (or manually here). We only fetch the ACTIVE ones for
+  // display + management. Deactivated rows stay in the database as history
+  // but drop out of the coach prompt automatically.
+  const [refinements, setRefinements] = useState([]);
+  const [refinementsBusy, setRefinementsBusy] = useState(null);
+
+  // Fetch active + non-expired refinements. Kept separate from the settings
+  // load because refinements are their own table.
+  const loadRefinements = async () => {
+    try {
+      const now = new Date().toISOString();
+      const rows = await sb(
+        `/programme_refinements?select=*&active=eq.true&or=(expires_at.is.null,expires_at.gt.${encodeURIComponent(now)})&order=created_at.desc`
+      );
+      setRefinements(rows || []);
+    } catch (e) {
+      // Table may not exist yet on very first deploy after this migration.
+      // Fail silent so Settings still renders.
+    }
+  };
+
+  const deactivateRefinement = async (id) => {
+    setRefinementsBusy(id);
+    // Optimistic: drop it locally first, roll back on error.
+    const prev = refinements;
+    setRefinements((p) => p.filter((r) => r.id !== id));
+    try {
+      await sb(`/programme_refinements?id=eq.${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active: false }),
+      });
+    } catch (e) {
+      setError(e.message);
+      setRefinements(prev);
+    } finally {
+      setRefinementsBusy(null);
+    }
+  };
+
   // ---- Load on mount ----
   useEffect(() => {
+    loadRefinements();
     (async () => {
       try {
         const rows = await sb("/settings?select=*&id=eq.1");
@@ -458,6 +499,83 @@ export default function Settings() {
         >
           ↺ Restore default programme
         </button>
+      </div>
+
+      {/* ---- Programme refinements (short-lived overrides from Claude chat) ---- */}
+      <div style={sectionStyle}>
+        <div style={sectionHeader}>PROGRAMME REFINEMENTS</div>
+        <div style={{ ...labelStyle, marginBottom: "12px", textTransform: "none", letterSpacing: "0", fontSize: "12px", color: T.textSub, fontWeight: 500, lineHeight: 1.5 }}>
+          Short-lived constraints, injury adaptations, temporary overrides.
+          Claude chat can write to these directly (via <code style={{ background: T.surface2, padding: "1px 4px", borderRadius: "3px", fontSize: "11px" }}>POST /api/refinements</code>).
+          Tap Deactivate when a refinement is resolved. Coach reads all active
+          + non-expired rows on every plan generation.
+        </div>
+
+        {refinements.length === 0 ? (
+          <div style={{
+            padding: "14px",
+            background: T.surface2,
+            borderRadius: "8px",
+            color: T.textMuted,
+            fontSize: "12px",
+            textAlign: "center",
+            fontStyle: "italic",
+          }}>
+            No active refinements. Coach uses standing programme context only.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {refinements.map((r) => {
+              const isBusy = refinementsBusy === r.id;
+              const createdStr = r.created_at ? new Date(r.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+              const expiresStr = r.expires_at ? new Date(r.expires_at).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : null;
+              return (
+                <div
+                  key={r.id}
+                  style={{
+                    background: T.surface,
+                    border: `1px solid ${T.border}`,
+                    borderLeft: `4px solid ${T.accent}`,
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px",
+                  }}
+                >
+                  <div style={{ fontSize: "13px", color: T.text, lineHeight: 1.4, whiteSpace: "pre-wrap" }}>
+                    {r.note}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                    <div style={{ fontSize: "10px", color: T.textMuted, letterSpacing: "0.06em", fontWeight: 600 }}>
+                      {createdStr}
+                      {r.source ? ` · ${r.source.toUpperCase()}` : ""}
+                      {expiresStr ? ` · EXPIRES ${expiresStr}` : ""}
+                    </div>
+                    <button
+                      onClick={() => deactivateRefinement(r.id)}
+                      disabled={isBusy}
+                      style={{
+                        background: "transparent",
+                        border: `1px solid ${T.border2}`,
+                        color: T.textSub,
+                        borderRadius: "6px",
+                        padding: "4px 10px",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        letterSpacing: "0.05em",
+                        cursor: isBusy ? "wait" : "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {isBusy ? "…" : "DEACTIVATE"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ---- Programme context (free-text that the coach reads on every call) ---- */}
