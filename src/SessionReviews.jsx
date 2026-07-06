@@ -121,11 +121,6 @@ OUTPUT — respond ONLY with a JSON object, no preamble or markdown fences:
 // Pull Garmin activities for a date from our server-side proxy.
 // Returns null on any error (including missing env vars on the server) so a
 // Garmin outage never blocks a review.
-//
-// Note: we used to fetch Strava here, but Garmin already covers everything
-// the coach needs (HR, pace, distance, training effect) AND the proxy is
-// already wired up + working. Strava-data.js stays in the repo dormant in
-// case we need it later but is no longer called from the review path.
 async function fetchGarminActivitiesForDate(dateStr) {
   if (!dateStr) return null;
   try {
