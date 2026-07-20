@@ -60,14 +60,22 @@ function fmtMl(ml) {
 }
 
 // Continuous HSL background gradient for drinking days on the calendar.
-// Maps units → hue: 0.1u = pale yellow (~60°), 10+u = light red (0°). Fixed
-// saturation + lightness keeps everything in the same soft "sticker" family
-// so the deep-amber units number reads on every shade. UK context reference:
-// low-risk single-session ≤2u, moderate 2–4u, heavy 4–6u, very heavy 6u+.
+// Maps units → hue over the range [0.1u = pale yellow ~60°, 12u+ = red 0°].
+// Fixed saturation + lightness keeps everything in the same soft "sticker"
+// family so the deep-amber units number reads on every shade.
+//
+// Reference points on the gradient (for tuning):
+//   1u   → hue 55  pale yellow
+//   2u   → hue 50  light amber      (~a small wine)
+//   4u   → hue 40  warm amber       (~a pint + a small wine)
+//   6u   → hue 30  orange           (~2 pints, moderate session)
+//   8u   → hue 20  deep orange
+//   10u  → hue 10  red-orange
+//   12u+ → hue 0   full red         (well past UK weekly max in a single day)
 function colorForUnits(units) {
   if (!units || units <= 0) return null;
-  const capped = Math.min(units, 10);
-  const hue = Math.max(0, 60 - capped * 6);
+  const capped = Math.min(units, 12);
+  const hue = Math.max(0, 60 - capped * 5);
   return `hsl(${hue}, 90%, 87%)`;
 }
 
