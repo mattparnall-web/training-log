@@ -559,6 +559,25 @@ export default function Alcohol() {
           renderDayDetail={(dayEntries) => {
             const alcoholOnly = dayEntries.filter((e) => e.drink_type !== "water");
             const totalMl = dayEntries.reduce((a, e) => a + waterMlOf(e), 0);
+            // Week totals for the ISO week containing the selected day.
+            // Derived from the first entry's consumed_at rather than a
+            // separate date arg (the shared component doesn't pass one to
+            // renderDayDetail).
+            const anchorIso = dayEntries[0]?.consumed_at
+              ? dateStrOf(dayEntries[0].consumed_at)
+              : null;
+            let weekAlcohol = [];
+            if (anchorIso) {
+              const wStart = startOfWeekFor(anchorIso).getTime();
+              const wEnd = endOfWeekFor(anchorIso).getTime();
+              weekAlcohol = entries.filter((e) => {
+                if (e.drink_type === "water") return false;
+                const t = new Date(e.consumed_at).getTime();
+                return t >= wStart && t <= wEnd;
+              });
+            }
+            const weekUnitsTotal = round1(weekAlcohol.reduce((a, e) => a + Number(e.units || 0), 0));
+            const weekCalsTotal = Math.round(weekAlcohol.reduce((a, e) => a + Number(e.calories || 0), 0));
             return (
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 {dayEntries.map(renderEntryRow)}
@@ -574,6 +593,19 @@ export default function Alcohol() {
                   {alcoholOnly.length} drinks · {round1(alcoholOnly.reduce((a, e) => a + Number(e.units || 0), 0))} units · {Math.round(alcoholOnly.reduce((a, e) => a + Number(e.calories || 0), 0))} cal
                   {totalMl > 0 ? ` · ${fmtMl(totalMl)} water` : ""}
                 </div>
+                {anchorIso && (
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: T.textMuted,
+                      fontWeight: 600,
+                      letterSpacing: "0.03em",
+                    }}
+                  >
+                    WEEK TOTAL · {weekAlcohol.length} drinks · {weekUnitsTotal} units · {weekCalsTotal} cal
+                    {weeklyTarget ? ` · ${Math.round((weekUnitsTotal / weeklyTarget) * 100)}% of ${weeklyTarget}u target` : ""}
+                  </div>
+                )}
               </div>
             );
           }}
