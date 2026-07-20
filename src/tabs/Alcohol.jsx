@@ -59,6 +59,18 @@ function fmtMl(ml) {
   return `${ml} ml`;
 }
 
+// Continuous HSL background gradient for drinking days on the calendar.
+// Maps units → hue: 0.1u = pale yellow (~60°), 10+u = light red (0°). Fixed
+// saturation + lightness keeps everything in the same soft "sticker" family
+// so the deep-amber units number reads on every shade. UK context reference:
+// low-risk single-session ≤2u, moderate 2–4u, heavy 4–6u, very heavy 6u+.
+function colorForUnits(units) {
+  if (!units || units <= 0) return null;
+  const capped = Math.min(units, 10);
+  const hue = Math.max(0, 60 - capped * 6);
+  return `hsl(${hue}, 90%, 87%)`;
+}
+
 // How far back to fetch on mount. ~3 months is enough for the typical calendar browse.
 const LOOKBACK_DAYS = 90;
 
@@ -469,13 +481,17 @@ export default function Alcohol() {
           // the alcohol-tracking view. Returning null tells the shared
           // component to skip that entry.
           dotColorOf={(e) => (e.drink_type === "water" ? null : (TYPE_COLOR[e.drink_type] || T.accent))}
-          // Mark alcohol-free past days in green. A day with ONLY water logged
-          // still counts as alcohol-free — water entries don't disqualify the
-          // green shading. Restrict to [first ever entry, today] so we don't
-          // paint every day since 1970.
+          // Colour every day the calendar has information about:
+          //   * Drinking days → warm gradient (yellow → red as units rise)
+          //   * Alcohol-free days (empty OR water-only) within the tracking
+          //     window → light green
+          //   * Everything else (future, out-of-window) → no override
           dayBackgroundOf={(dayEntries, ds) => {
             const alcohol = dayEntries.filter((e) => e.drink_type !== "water");
-            if (alcohol.length > 0) return null;
+            if (alcohol.length > 0) {
+              const units = round1(alcohol.reduce((a, e) => a + Number(e.units || 0), 0));
+              return colorForUnits(units);
+            }
             if (entries.length === 0) return null;
             const todayStr = todayString();
             const earliest = dateStrOf(entries[entries.length - 1].consumed_at);
