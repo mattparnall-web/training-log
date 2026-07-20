@@ -463,7 +463,10 @@ export default function Alcohol() {
       {view === "calendar" && (
         <CalendarMonthView
           entries={entries}
-          dotColorOf={(e) => TYPE_COLOR[e.drink_type] || T.accent}
+          // Water contributes no dot — it's neither positive nor negative on
+          // the alcohol-tracking view. Returning null tells the shared
+          // component to skip that entry.
+          dotColorOf={(e) => (e.drink_type === "water" ? null : (TYPE_COLOR[e.drink_type] || T.accent))}
           // Mark alcohol-free past days in green. A day with ONLY water logged
           // still counts as alcohol-free — water entries don't disqualify the
           // green shading. Restrict to [first ever entry, today] so we don't
@@ -477,12 +480,32 @@ export default function Alcohol() {
             if (ds < earliest || ds > todayStr) return null;
             return "#bbf7d0"; // light green
           }}
-          // Stamp 'WEAK / TO / STRONG' across alcohol-free past days (water-only
-          // counts). Stacked across three short lines so it fits a calendar
-          // square on mobile.
+          // Inner content for every day. Three cases:
+          //   1. Any alcohol logged → show total UK units (e.g. "4.2u")
+          //   2. No alcohol on a day within the tracking window → positive label
+          //   3. Everything else (future, out-of-window) → null (falls back
+          //      to default dot rendering, which will be nothing for empty days)
           dayInnerOverlay={(dayEntries, ds) => {
             const alcohol = dayEntries.filter((e) => e.drink_type !== "water");
-            if (alcohol.length > 0) return null;
+            if (alcohol.length > 0) {
+              const units = round1(alcohol.reduce((a, e) => a + Number(e.units || 0), 0));
+              return (
+                <div
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 800,
+                    color: "#7c2d12", // deep amber — reads as "you drank"
+                    lineHeight: 1,
+                    textAlign: "center",
+                    letterSpacing: "-0.02em",
+                  }}
+                >
+                  {units}<span style={{ fontSize: "9px", fontWeight: 600, marginLeft: "1px" }}>u</span>
+                </div>
+              );
+            }
+            // No alcohol — was it a day within the tracking window? If so,
+            // reward it with the positive label.
             if (entries.length === 0) return null;
             const todayStr = todayString();
             const earliest = dateStrOf(entries[entries.length - 1].consumed_at);
@@ -490,18 +513,17 @@ export default function Alcohol() {
             return (
               <div
                 style={{
-                  fontSize: "6px",
+                  fontSize: "7px",
                   fontWeight: 800,
                   letterSpacing: "0.05em",
                   color: "#14532d",
-                  lineHeight: 1.1,
+                  lineHeight: 1.15,
                   textAlign: "center",
                   textTransform: "uppercase",
                 }}
               >
-                <div>weak</div>
-                <div>to</div>
-                <div>strong</div>
+                <div>good</div>
+                <div>call</div>
               </div>
             );
           }}

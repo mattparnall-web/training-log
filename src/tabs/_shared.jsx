@@ -624,16 +624,23 @@ export function CalendarMonthView({
           const isToday = ds === todayStr;
           const isFuture = ds > todayStr;
           const isSelected = selectedDate === ds;
-          const dots = dayEntries.slice(0, 5).map(dotColorOf);
-          const more = dayEntries.length > 5;
+          // Dot colours per entry. `dotColorOf` may return null/undefined
+          // for entries the tab wants to suppress (e.g. water on the Drinks
+          // tab shouldn't contribute a blue dot). Filter those out BEFORE
+          // slicing to the max-5 cap.
+          const allDotColors = dayEntries.map(dotColorOf).filter((c) => !!c);
+          const dots = allDotColors.slice(0, 5);
+          const more = allDotColors.length > 5;
 
           // Tab-specific background override (e.g. sauna red, ice-bath blue,
           // alcohol-free green). Returned value can be a colour or gradient.
           // Selected/today states still win — those are clear UI signals we
           // shouldn't drown out.
           const customBg = dayBackgroundOf ? dayBackgroundOf(dayEntries, ds) : null;
-          // Tab-specific inner content shown when there are no entries (used
-          // by the Alcohol tab to label alcohol-free days "WEAK TO STRONG").
+          // Tab-specific inner content. Called for EVERY day (with or without
+          // entries) so the tab has full control — the Drinks tab uses this
+          // to show units on alcohol days AND a positive label on clean days.
+          // A non-null return replaces the default dot rendering entirely.
           const overlay = dayInnerOverlay ? dayInnerOverlay(dayEntries, ds) : null;
 
           const defaultBg = dayEntries.length > 0 ? T.surface : isFuture ? T.bg : T.surface2;
@@ -686,7 +693,23 @@ export function CalendarMonthView({
               >
                 {day}
               </div>
-              {dayEntries.length > 0 ? (
+              {overlay != null ? (
+                // Consumer-provided override wins on every day it returns
+                // non-null. Used by the Drinks tab to show units on alcohol
+                // days and a positive label on clean days.
+                <div
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flex: 1,
+                  }}
+                >
+                  {overlay}
+                </div>
+              ) : dots.length > 0 ? (
                 <div
                   style={{
                     display: "flex",
@@ -717,21 +740,6 @@ export function CalendarMonthView({
                       +
                     </div>
                   )}
-                </div>
-              ) : overlay ? (
-                // No entries — render the consumer-provided overlay if any.
-                // Used for empty alcohol-free days etc.
-                <div
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flex: 1,
-                  }}
-                >
-                  {overlay}
                 </div>
               ) : null}
             </div>
