@@ -75,6 +75,10 @@ export default function Settings() {
   // Matt pastes this from his previous Claude chats — goals, blocks, history,
   // constraints, anything that should stay in the coach's awareness.
   const [programmeContext, setProgrammeContext] = useState("");
+  // Custom label shown on alcohol-free days on the Drinks calendar. Split
+  // on space at render time so multi-word labels stack vertically inside
+  // the tiny cell (e.g. "GOOD CALL" → GOOD / CALL). Empty = no label.
+  const [cleanDayLabel, setCleanDayLabel] = useState("");
 
   // The user-editable weekly programme — 7 day defs (Mon..Sun). Each has a
   // name, type, and bucket. Initialised from settings.weekly_schedule or the
@@ -141,6 +145,7 @@ export default function Settings() {
           setAlcoholTarget(row.weekly_alcohol_units_target ?? "");
           setKeyLifts(Array.isArray(row.key_lifts) ? row.key_lifts : []);
           setProgrammeContext(row.programme_context ?? "");
+          setCleanDayLabel(row.clean_day_label ?? "");
           setWeeklySchedule(weeklyScheduleFor(row));
           const nt = row.nutrition_targets || {};
           setNutritionTargets({
@@ -215,6 +220,7 @@ export default function Settings() {
         daily_protein_target_g: numOrNull(proteinTarget),
         weekly_alcohol_units_target: numOrNull(alcoholTarget),
         programme_context: programmeContext?.trim() ? programmeContext.trim() : null,
+        clean_day_label: cleanDayLabel?.trim() ? cleanDayLabel.trim() : null,
         // Persist only the fields the user owns; id / label / color are
         // derived from position + type and recomputed on read.
         weekly_schedule: weeklySchedule.map((d) => ({
@@ -292,6 +298,7 @@ export default function Settings() {
                 setAlcoholTarget(row.weekly_alcohol_units_target ?? "");
                 setKeyLifts(Array.isArray(row.key_lifts) ? row.key_lifts : []);
                 setProgrammeContext(row.programme_context ?? "");
+          setCleanDayLabel(row.clean_day_label ?? "");
                 setWeeklySchedule(weeklyScheduleFor(row));
                 const nt = row.nutrition_targets || {};
                 setNutritionTargets({
@@ -614,6 +621,21 @@ export default function Settings() {
           value={alcoholTarget}
           onChange={(e) => { setAlcoholTarget(e.target.value); markDirty(); }}
           placeholder="e.g. 14"
+          style={inputStyle}
+        />
+
+        <div style={{ ...labelStyle, marginTop: "16px" }}>Alcohol-free day label</div>
+        <div style={{ fontSize: "11px", color: T.textMuted, marginBottom: "6px", lineHeight: 1.4 }}>
+          Shown on green days on the Drinks calendar. Split on spaces to
+          stack vertically — e.g. "GOOD CALL" renders on two lines. Leave
+          blank for no label.
+        </div>
+        <input
+          type="text"
+          maxLength={30}
+          value={cleanDayLabel}
+          onChange={(e) => { setCleanDayLabel(e.target.value); markDirty(); }}
+          placeholder="e.g. GOOD CALL"
           style={inputStyle}
         />
       </div>

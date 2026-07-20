@@ -69,6 +69,7 @@ export default function Alcohol() {
   const [loading, setLoading] = useState(true);
   const [logging, setLogging] = useState(null);
   const [weeklyTarget, setWeeklyTarget] = useState(null);
+  const [cleanDayLabel, setCleanDayLabel] = useState("");
   const [error, setError] = useState(null);
 
   const isToday = selectedDate === todayString();
@@ -93,9 +94,10 @@ export default function Alcohol() {
   useEffect(() => {
     (async () => {
       try {
-        const settings = await sb("/settings?select=weekly_alcohol_units_target&id=eq.1");
+        const settings = await sb("/settings?select=weekly_alcohol_units_target,clean_day_label&id=eq.1");
         const t = settings?.[0]?.weekly_alcohol_units_target;
         setWeeklyTarget(typeof t === "number" ? t : null);
+        setCleanDayLabel(settings?.[0]?.clean_day_label ?? "");
       } catch {}
       load();
     })();
@@ -505,15 +507,21 @@ export default function Alcohol() {
               );
             }
             // No alcohol — was it a day within the tracking window? If so,
-            // reward it with the positive label.
+            // show the user-defined clean-day label (from Settings). Empty
+            // label = no text, just the green cell.
             if (entries.length === 0) return null;
             const todayStr = todayString();
             const earliest = dateStrOf(entries[entries.length - 1].consumed_at);
             if (ds < earliest || ds > todayStr) return null;
+            if (!cleanDayLabel?.trim()) return null;
+            const parts = cleanDayLabel.trim().split(/\s+/);
+            // Font size scales with word count — one word can be bigger,
+            // multiple words need to be smaller to fit.
+            const fontSize = parts.length === 1 ? "10px" : parts.length === 2 ? "8px" : "7px";
             return (
               <div
                 style={{
-                  fontSize: "7px",
+                  fontSize,
                   fontWeight: 800,
                   letterSpacing: "0.05em",
                   color: "#14532d",
@@ -522,8 +530,9 @@ export default function Alcohol() {
                   textTransform: "uppercase",
                 }}
               >
-                <div>good</div>
-                <div>call</div>
+                {parts.map((p, i) => (
+                  <div key={i}>{p}</div>
+                ))}
               </div>
             );
           }}
